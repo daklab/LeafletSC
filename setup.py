@@ -5,6 +5,6 @@ setup(
     packages=find_packages(),
     version='0.1.0',
     description='Alternative splicing quantification in single cells',
-    author='karini925',
+    author='Karin Isaev, Columbia University and NYGC',
     license='MIT',
 )
