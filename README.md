@@ -6,40 +6,12 @@ Alternative splicing quantification in single cells
 Project Organization
 ------------
 
-    ├── LICENSE
-    ├── snakemake          <- folder with snakemake pipeline to run the whole set of steps from BAM files to differentially spliced junctions
-    ├── README.md          
-    ├── data
-    │   ├── external       <- Data from third party sources.
-    │   ├── interim        <- Intermediate data that has been transformed.
-    │   ├── processed      <- The final, canonical data sets for modeling.
-    │   └── raw            <- The original, immutable data dump.
-    │    
-    ├── models             <- Trained and serialized models, model predictions, or model summaries
-    │
-    ├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-    │                         the creator's initials, and a short `-` delimited description, e.g.
-    │                         `1.0-jqp-initial-data-exploration`.
-    │    
-    ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-    │   └── figures        <- Generated graphics and figures to be used in reporting
-    │
-    ├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-    │                         generated with `pip freeze > requirements.txt`
-    │
-    ├── setup.py           <- makes project pip installable (pip install -e .) so src can be imported
-    └── src                <- Source code for use in this project.
-        ├── __init__.py    <- Makes src a Python module
-        │
-        ├── data           <- Scripts to download or generate data
-        │   └── make_dataset.py
-        │
-        ├── features       <- Scripts to turn raw data into features for modeling
-        │   └── build_features.py
-        │
-        └── visualization  <- Scripts to create exploratory and results oriented visualizations
-           └── visualize.py
+How to run leafcutter-sc? 
 
---------
+1. First, obtain pseudo-bulk BAM files that represent known cell types. If cell types are not well defined, cluster your single cells based on gene expression and save cell labels. Seperate your cells into those clusters such that there is one BAM file for each cluster label. 
 
-<p><small>Project based on the <a target="_blank" href="https://drivendata.github.io/cookiecutter-data-science/">cookiecutter data science project template</a>. #cookiecutterdatascience</small></p>
+2. Run the snakemake pipeline using the scripts in [snakemake], change all paths and parameters to match your setup. The pipeline will output several useful files but the main steps include:
+   - Realigning BAM file so that the -XS strand is present in the BAM file to indicate important strand information
+   - Deduplicating UMIs in BAM file + Indexing BAM file
+   - Calculate UMI counts across individual cells and genes 
+   - Extract junctions using regtools while maintaining single cell information
