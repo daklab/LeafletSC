@@ -22,4 +22,4 @@ How to run leafcutter-sc?
    - Whether you want to focus on events that are most likely canonical rather than cryptic or rare 
    - How you want to name your output file 
 
-4. Run a beta-binomial LDA model to extract cell states and junctions that may be differentially spliced between them. To run this, first prepare an input file from your output in step 3 by running the script in [here](src/clustering/)
+4. Run a beta-binomial LDA model to extract cell states and junctions that may be differentially spliced between them. To run this, first prepare an input file from your output in step 3 by running the script in [here](src/beta-binomial-lda/prepare_input_coo.py). Then run the model using the script [here](src/beta-binomial-lda/). 
