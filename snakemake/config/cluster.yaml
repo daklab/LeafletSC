@@ -1,0 +1,6 @@
+__default__:
+    partition:  pe2 # users specified
+    mem:    95000M
+    time:   "5-00:00"
+    ncpus:  4
+    out:  "/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/slurm_outputs/%x-%j.out"
