@@ -6,6 +6,8 @@ from os.path import join
 configfile: "/gpfs/commons/home/kisaev/zoo-splice/parse-pbmc/leafcutter/config/config_samples.json"
 configfile: "/gpfs/commons/home/kisaev/zoo-splice/parse-pbmc/leafcutter/config/cluster.yaml"
 
+#PBMC data
+
 ### Globals ---------------------------------------------------------------------
 
 # A Snakemake regular expression matching bam files.
@@ -112,13 +114,27 @@ rule deduplicate_umis:
 		#index file immdeiatley
 		sambamba index {output.out_bam}
 		"""
-		
+
+rule get_umi_counts:
+	input:
+		bam_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.bam"),
+		bai_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.bam.bai"),
+	message:
+		"Count UMIs per gene per cell (only considers reads that are annotated with gene in the GX tag)"
+	output:
+		output_counts=join(config["bamDir"], "{sample}.counts.tsv.gz"),
+	shell:
+		"""
+		umi_tools count --per-gene --gene-tag=GX --assigned-status-tag=XS --per-cell --cell-tag=CB -I {input.bam_use} -S {output.output_counts} --extract-umi-method=tag --umi-tag=pN
+		"""
+
 # Get junctions from pseudobulk files
 
 rule get_junctions:
 	input:
 		bam_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.dedup.bam"),
 		bai_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.dedup.bam.bai"),
+		umi_counts=join(config["bamDir"], "{sample}.counts.tsv.gz"),
 	output:
 		juncs=join(config["juncDir"], "{sample}.junction"),
 		barcodes=join(config["juncDir"], "{sample}.barcodes"),
@@ -135,5 +151,5 @@ rule get_junctions:
 		paste --delimiters='\t' {output.juncs} {output.barcodes} > {output.juncswbarcodes}
 		"""
 
-#Run beta-binom LDA to extract cell states and differentially spliced junctions across them
-#TO-DO: add implementation 
+#to-do
+#run beta-binomial LDA model on junction/cluster counts per cell 
