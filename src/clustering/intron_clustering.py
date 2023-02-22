@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import argparse
 from datetime import datetime
 import glob
@@ -7,9 +6,7 @@ import os
 import pyranges as pr
 from gtfparse import read_gtf
 from tqdm import tqdm
-import time
-import anndata as ad
-from scipy.sparse import csr_matrix
+import pdb 
 
 parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
 
@@ -70,10 +67,10 @@ def load_files(filenames):
         #remove junctions that only got less than 3 cell mapping to it 
         juncs['split_up'] = juncs["cell_readcounts"].str.split(',')
         juncs=juncs.drop(["cell_readcounts"], axis=1)
-        juncs = juncs[juncs.num_cells_wjunc >= 5] #junction has at least one read count in at least three different cells (should also be changeable parameter)
+        juncs = juncs[juncs.num_cells_wjunc >= 2] # junction has at least one read count in at least two different cells (should also be changeable parameter)
         
-        #remove junctions that have less than 3 total read counts covering it 
-        juncs = juncs[juncs["score"] > 5] 
+        #remove junctions that have less than 2 total read counts covering it 
+        juncs = juncs[juncs["score"] >= 2] 
         
         #extract name of cells 
         filename = filename.split("/")[-1]
@@ -124,6 +121,7 @@ def main(junc_files, gtf_file, setting, output):
     """
 
     startTime = datetime.now()
+    print("Start time: " + str(startTime), "starting junction/intron clustering analysis")
 
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #        Run analysis and obtain intron clusters
@@ -141,10 +139,12 @@ def main(junc_files, gtf_file, setting, output):
     gtf_exons_gr = gtf_exons_gr[ ~ (gtf_exons_gr.Start == gtf_exons_gr.End)]
     gtf_exons_gr.Start = gtf_exons_gr.Start-1
 
+    print("done extracting exons from gtf file")
+
     #[2] collect all junctions across all cell types 
     all_files = glob.glob(os.path.join(junc_files, "*.wbarcode.junc"))
     df = pd.concat(load_files(all_files))
-    print("done collecting junctions")
+    print("done extracting junctions")
 
     #add unique value to each junction name (going to appear multiple times otherwise once for each sample)
     df["name"] = df["name"] + df.groupby("name").cumcount().astype(str)
@@ -155,7 +155,7 @@ def main(junc_files, gtf_file, setting, output):
 
     #keep only junctions that could be actually related to isoforms that we expect in our cells (via gtf file provided)
     print("The number of junctions prior to assessing distance to exons is " + str(len(gr.junction_id.unique())))
-    junctions_only_orig=gr #save a copy of just gr object for junctions
+    #junctions_only_orig=gr #save a copy of just gr object for junctions
 
     #[3] annotate each junction with genes 
     gr = gr.k_nearest(gtf_exons_gr, strandedness = "same", ties="different", k=2, overlap=False)
@@ -163,7 +163,7 @@ def main(junc_files, gtf_file, setting, output):
     gr = gr[(gr.Start.isin(gr.End_b)) & (gr.End.isin(gr.Start_b))]
     #ensure distance parameter is still 1 
     gr = gr[gr.Distance == 1]
-    print("The number of junctions after assessing distance to exons is " + str(len(gr.junction_id.unique()))) #what's up with all the junctions that aren't within 10bp of exons? check where they are appearing in the genome? (noise? non human genes / not mapping to human PBMC reference)
+    print("The number of junctions after assessing distance to exons is " + str(len(gr.junction_id.unique()))) 
 
     #[4]  "cluster" introns events by gene  
     clusters = gr.cluster(by="gene_id", slack=-1, count=True)
@@ -198,29 +198,25 @@ def main(junc_files, gtf_file, setting, output):
     assert((clusters_df.groupby(['Cluster'])["gene_id"].nunique().reset_index().gene_id.unique() == 1))
 
     df=df[df.junction_id.isin(clusters_df["junction_id"])] 
-    clusters=clusters_df[["junction_id", "Cluster", "gene_id", "transcript_id"]]
+    clusters=clusters_df[["junction_id", "Cluster", "gene_id"]].drop_duplicates()
 
     #[6]  Get final list of junction coordinates and save to bed file (easy visualization in IGV)
     gr = gr[gr.junction_id.isin(df["junction_id"])]
     gr = gr[["Chromosome", "Start", "End", "Strand", "junction_id", "Cluster"]]
     gr = gr.drop_duplicate_positions()
-    gr.to_bed("extracted_junction_coordinates.bed", chain=True)
+    gr.to_bed("extracted_junction_coordinates.bed", chain=True) #add option to add prefix to file name
 
     #summary number of junctions per cluster 
     summ_clusts_juncs=clusters[["Cluster", "junction_id"]].drop_duplicates().groupby("Cluster")["junction_id"].count().reset_index()
     summ_clusts_juncs = summ_clusts_juncs.sort_values("junction_id", ascending=False)
 
-    #remove transcript_id columns
-    clusters=clusters.drop("transcript_id", axis=1)
-    clusters=clusters.drop_duplicates()
-
-    #ensure junction doesn't belong to more than 1 cluster 
+    #check if junction doesn't belong to more than 1 cluster 
     juncs_clusts = clusters.groupby("junction_id")["Cluster"].count().reset_index()
 
-    #for now keep those junctions, might be in regions where there are multiple 
+    # for now keep those junctions, might be in regions where there are multiple 
     # overlapping genes so would be hard to decipher anyhow 
-    #can look in more detail at this later at some point 
-    #for now just report them so user knows to be more careful with them, the clustering is also done on gene level
+    # can look in more detail at this later at some point 
+    # for now just report them so user knows to be more careful with them, the clustering is also done on gene level
     print(juncs_clusts[juncs_clusts["Cluster"] > 1])
 
     #combine cell junction counts with info on junctions and clusters 
@@ -238,3 +234,7 @@ if __name__ == '__main__':
     setting=args.setting
     output_file=args.output
     main(path, gtf_file, setting, output_file)
+
+
+# to test run 
+#python intron_clustering.py --gtf_file /gpfs/commons/groups/knowles_lab/Karin/genome_files/Homo_sapiens.GRCh38.108.chr.gtf --junc_files /gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions --output_file /gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/clustered_junctions.txt --setting canonical

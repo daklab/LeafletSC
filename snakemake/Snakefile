@@ -3,8 +3,7 @@ from pathlib import Path
 import subprocess
 from os.path import join
 
-configfile: "/gpfs/commons/home/kisaev/zoo-splice/parse-pbmc/leafcutter/config/config_samples.json"
-configfile: "/gpfs/commons/home/kisaev/zoo-splice/parse-pbmc/leafcutter/config/cluster.yaml"
+configfile: "/gpfs/commons/home/kisaev/leafcutter-sc/snakemake/config/cluster.yaml"
 
 #PBMC data
 
@@ -25,10 +24,6 @@ wildcard_constraints:
 
 # Pipeline output files
 # 
-
-#rerun making junctions and remove "hg38" from chromosome names (add back that first rule)
-#config["juncDir"] + "leafcutter_perind_numers.counts.gz"
-#expand(join(config["juncDir"], "{sample}.junc"), sample=SAMPLES)
 
 rule all:
 	input:
@@ -117,24 +112,23 @@ rule deduplicate_umis:
 
 rule get_umi_counts:
 	input:
-		bam_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.bam"),
-		bai_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.bam.bai"),
+		bam_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.dedup.bam"),
+		bai_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.dedup.bam.bai"),
 	message:
 		"Count UMIs per gene per cell (only considers reads that are annotated with gene in the GX tag)"
 	output:
-		output_counts=join(config["bamDir"], "{sample}.counts.tsv.gz"),
+		output_counts=join(config["bamDir"], "{sample}.umi_counts.tsv.gz"),
 	shell:
 		"""
-		umi_tools count --per-gene --gene-tag=GX --assigned-status-tag=XS --per-cell --cell-tag=CB -I {input.bam_use} -S {output.output_counts} --extract-umi-method=tag --umi-tag=pN
+		umi_tools group --spliced-is-unique --per-cell --cell-tag=CB -I {input.bam_use} --group-out={output.output_counts} --extract-umi-method=tag --umi-tag=pN
 		"""
-
 # Get junctions from pseudobulk files
 
 rule get_junctions:
 	input:
 		bam_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.dedup.bam"),
 		bai_use=join(config["bamDir"], "{sample}.clean.realigned_xs_Aligned.sortedByCoord.out.dedup.bam.bai"),
-		umi_counts=join(config["bamDir"], "{sample}.counts.tsv.gz"),
+		umi_counts=join(config["bamDir"], "{sample}.umi_counts.tsv.gz"),
 	output:
 		juncs=join(config["juncDir"], "{sample}.junction"),
 		barcodes=join(config["juncDir"], "{sample}.barcodes"),
@@ -147,7 +141,7 @@ rule get_junctions:
 	shell:
 		"""
 		regtools_run=/gpfs/commons/home/kisaev/regtools/build/regtools
-		$regtools_run junctions extract -a 8 -m 50 -M 500000 {input.bam_use} -o {output.juncs} -s XS -b {output.barcodes}
+		$regtools_run junctions extract -a 6 -m 50 -M 500000 {input.bam_use} -o {output.juncs} -s XS -b {output.barcodes}
 		paste --delimiters='\t' {output.juncs} {output.barcodes} > {output.juncswbarcodes}
 		"""
 
