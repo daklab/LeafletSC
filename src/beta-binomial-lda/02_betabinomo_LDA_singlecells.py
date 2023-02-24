@@ -12,7 +12,6 @@ import pandas as pd
 import numpy as np
 import copy
 
-from scipy.special import digamma, betaln
 from scipy.sparse import coo_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -134,25 +133,42 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI):
     E_log_p_xz_part1 = 0
     E_log_p_xz_part2 = 0
 
+    # make copies of the variational parameters - do I need to do this here? 
+    ALPHA_t = copy.deepcopy(ALPHA)
+    PI_t = copy.deepcopy(PI)
     PHI_t = copy.deepcopy(PHI)
     GAMMA_t = copy.deepcopy(GAMMA)
 
     ### E[log p(Z_ij|THETA_i)]    
-    all_digammas = (torch.digamma (GAMMA_t) - torch.digamma (GAMMA_t.sum(dim=1)).unsqueeze(1)) # shape: (N, K)
+    all_digammas = (torch.digamma(GAMMA_t) - torch.digamma(GAMMA_t.sum(dim=1)).unsqueeze(1)) # shape: (N, K)
     E_log_p_xz_part1 += sum(torch.sum(PHI_t[c] @ all_digammas[c]) for c in range(PHI_t.shape[0])) #
     
     ### E[log p(Y_ij | BETA, Z_ij)] BETA here defines our probability of success for every junction given a cell state
-    lnBeta = (torch.digamma (ALPHA) - torch.digamma (ALPHA + PI)).unsqueeze(0) # shape: (1, J, K)
-    ln1mBeta = torch.digamma (PI) - torch.digamma (ALPHA + PI).unsqueeze(0) # shape: (1, J, K)
+    lnBeta = (torch.digamma(ALPHA_t) - torch.digamma(ALPHA_t + PI_t)).unsqueeze(0) # shape: (1, J, K)
+    ln1mBeta = torch.digamma(PI_t) - torch.digamma(ALPHA_t + PI_t).unsqueeze(0) # shape: (1, J, K)
+
+    batch_sizes = []
 
     for c, (juncs, clusters) in enumerate(cell_junc_counts): #cell_junc_counts is a dataloader object
+
+        batch_size = juncs.size(0)
+        batch_sizes.append(batch_size)
+        
+        start_idx = c * batch_size
+        end_idx = start_idx + batch_size
+
+        if(c>0):
+            start_idx = batch_sizes[c-1]
+            end_idx = start_idx + batch_size    
+
+        print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
 
         # Broadcast the lnBeta tensor along the batch dimension
         lnBeta_t = lnBeta.expand(juncs.size(0), -1, -1)  # shape: (32, J, K) where 32 is batch size
         ln1mBeta_t = ln1mBeta.expand(juncs.size(0), -1, -1)  # shape: (32, J, K) where 32 is batch size
 
-        # Compute the index range for the current batch
-        phi_batch = PHI[c:c+juncs.size(0)]  # shape: (batch_size, J, K)
+        # Get the phi values for the current batch
+        phi_batch = PHI_t[start_idx:end_idx]  
 
         # Perform the element-wise multiplication - i think these steps take the longest
         second_term = torch.mul(lnBeta_t, juncs.unsqueeze(-1)).squeeze(-1)
@@ -241,7 +257,7 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
         print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
 
         # Get GAMMA for that cell and for this iteration so that PHI can be updated 
-        GAMMA_i_t = copy.deepcopy(GAMMA_t[start_idx:end_idx]) # K-vector 
+        GAMMA_i_t = (GAMMA_t[start_idx:end_idx]) # K-vector 
         
         # Update PHI_c to PHI_c+batch.size
         ALPHA_t_iter = ALPHA_t.expand(juncs.size(0), -1, -1)  # shape: (32, 3624, 2) where 32 is batch size
@@ -259,20 +275,14 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
         PHI_i = PHI_i / PHI_i.sum(dim=-1).unsqueeze(-1)
         PHI_t[start_idx:end_idx] = PHI_i 
         
-        print(theta_prior + torch.sum(PHI_t[end_idx-1], axis=0))
-
         # Update GAMMA_c using the updated PHI_c
         GAMMA_i_t = theta_prior + torch.sum(PHI_t[start_idx:end_idx], axis=1)
         GAMMA_t[start_idx:end_idx] = GAMMA_i_t    
-        print(GAMMA_t[end_idx-1])
 
-        #calculate ELBO after GAMMA update --> seems to be lower than after PHI update so something might be wrong
-        print("Get ELBO post PHI and GAMMA updates for current batch of cells")
-        get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
+    #calculate ELBO after GAMMA update --> seems to be lower than after PHI update so something might be wrong
+    print("Get ELBO post PHI and GAMMA updates for current batch of cells")
+    get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
 
-    #santiy check 
-    print(GAMMA_t[-1])
-    print(theta_prior + torch.sum(PHI_t[-1], dim=0))
     return(PHI_t, GAMMA_t)    
 
 def update_beta(PHI, GAMMA, alpha_prior=0.65, beta_prior=0.65):
@@ -299,7 +309,6 @@ def update_beta(PHI, GAMMA, alpha_prior=0.65, beta_prior=0.65):
             start_idx = batch_sizes[c-1]
             end_idx = start_idx + batch_size   
         
-        print(c, batch_size)
         phi_values = PHI_t[start_idx:end_idx]
         # since most junction counts are zeroes should be ending up with a lot of zeros in the sum every time
         ALPHA_t += torch.sum((juncs.unsqueeze(-1) * phi_values), dim=0) #removed prior since it's added during inintialization   
@@ -316,17 +325,14 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI):
     '''
     Update variational parameters for beta, theta and z distributions
     '''
-    
+
     PHI_up, GAMMA_up = update_z_theta(ALPHA, PI, GAMMA, PHI) #slowest part#*****
     print("got the z and theta updates")
-    
-    #santiy check 
-    print(GAMMA_up[-1])
-    print(torch.sum(PHI_up[-1], dim=0) + 0.1)
-    
+        
     ALPHA_up, PI_up = update_beta(PHI_up, GAMMA_up)
+    
     print("got the beta updates")
-
+    get_elbo(ALPHA_up, PI_up, GAMMA_up, PHI_up)
     return(ALPHA_up, PI_up, GAMMA_up, PHI_up)
 
 # %%
@@ -346,11 +352,11 @@ def calculate_CAVI(num_iterations=5):
     elbos.append(elbo)
     for i in range(num_iterations):
         print(i)
-        ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
-        elbo = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
+        ALPHA_new, PI_new, GAMMA_new, PHI_new = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
+        elbo = get_elbo(ALPHA_new, PI_new, GAMMA_new, PHI_new)
         elbos.append(elbo)
         
-    return(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, elbos)
+    return(ALPHA_new, PI_new, GAMMA_new, PHI_new, elbos)
 
 # %%
 if __name__ == "__main__":
