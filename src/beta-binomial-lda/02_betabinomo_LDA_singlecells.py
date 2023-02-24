@@ -140,12 +140,12 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI):
     GAMMA_t = copy.deepcopy(GAMMA)
 
     ### E[log p(Z_ij|THETA_i)]    
-    all_digammas = (torch.digamma(GAMMA_t) - torch.digamma(GAMMA_t.sum(dim=1)).unsqueeze(1)) # shape: (N, K)
+    all_digammas = (torch.digamma(GAMMA_t) - torch.digamma(torch.sum(GAMMA_t, dim=1)).unsqueeze(1)) # shape: (N, K)
     E_log_p_xz_part1 += sum(torch.sum(PHI_t[c] @ all_digammas[c]) for c in range(PHI_t.shape[0])) #
     
     ### E[log p(Y_ij | BETA, Z_ij)] BETA here defines our probability of success for every junction given a cell state
     lnBeta = (torch.digamma(ALPHA_t) - torch.digamma(ALPHA_t + PI_t)).unsqueeze(0) # shape: (1, J, K)
-    ln1mBeta = torch.digamma(PI_t) - torch.digamma(ALPHA_t + PI_t).unsqueeze(0) # shape: (1, J, K)
+    ln1mBeta = (torch.digamma(PI_t) - torch.digamma(ALPHA_t + PI_t)).unsqueeze(0) # shape: (1, J, K)
 
     batch_sizes = []
 
@@ -163,17 +163,22 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI):
 
         print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
 
+        pdb.set_trace()
+
         # Broadcast the lnBeta tensor along the batch dimension
-        lnBeta_t = lnBeta.expand(juncs.size(0), -1, -1)  # shape: (32, J, K) where 32 is batch size
-        ln1mBeta_t = ln1mBeta.expand(juncs.size(0), -1, -1)  # shape: (32, J, K) where 32 is batch size
+        lnBeta_t = copy.deepcopy(lnBeta)
+        ln1mBeta_t = copy.deepcopy(ln1mBeta)
+        
+        lnBeta_t = lnBeta_t.expand(juncs.size(0), -1, -1)  # shape: (32, J, K) where 32 is batch size
+        ln1mBeta_t = ln1mBeta_t.expand(juncs.size(0), -1, -1)  # shape: (32, J, K) where 32 is batch size
 
         # Get the phi values for the current batch
         phi_batch = PHI_t[start_idx:end_idx]  
 
         # Perform the element-wise multiplication - i think these steps take the longest
-        second_term = torch.mul(lnBeta_t, juncs.unsqueeze(-1)).squeeze(-1)
-        third_term = torch.mul(ln1mBeta_t, (clusters-juncs).unsqueeze(-1)).squeeze(-1)
-        E_log_p_xz_part2 += torch.sum(phi_batch * (second_term + third_term))
+        second_term = torch.mul(lnBeta_t, juncs.unsqueeze(-1)).squeeze(-1) #shape: (32, J, K) if 32 is the batch size
+        third_term = torch.mul(ln1mBeta_t, (clusters-juncs).unsqueeze(-1)).squeeze(-1) #shape: (32, J, K) if 32 is the batch size
+        E_log_p_xz_part2 += torch.sum(phi_batch * (second_term + third_term)) #check that summation dimension is correct****
     
     E_log_p_xz = E_log_p_xz_part1 + E_log_p_xz_part2
     return(E_log_p_xz)
