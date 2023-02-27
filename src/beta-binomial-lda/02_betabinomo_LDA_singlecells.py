@@ -82,7 +82,8 @@ def init_var_params(eps = 1e-2):
     PI = torch.from_numpy(np.random.uniform(0.01, 0.99, size=(J, K)))
 
     # Topic Proportions (cell states proportions), GAMMA ~ Dirichlet(eta) 
-    GAMMA = (torch.rand((N, K)).double() + eps) * 100
+    #GAMMA = (torch.rand((N, K)).double() + eps) * 100
+    GAMMA = torch.ones((N, K)).double() #* 100
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
     PHI = torch.rand((N, J, K)).double() + eps
@@ -215,15 +216,11 @@ def get_elbo(ALPHA, PI, GAMMA, PHI):
     
     #1. Calculate expected log joint
     E_log_pbeta_val = E_log_pbeta(ALPHA, PI)
-    #print("E_log_pbeta_val" + str(E_log_pbeta_val))
     E_log_ptheta_val = E_log_ptheta(GAMMA)
-    #print("E_log_ptheta_val" + str(E_log_ptheta_val))
     E_log_pzx_val = E_log_xz(ALPHA, PI, GAMMA, PHI) #**this step takes a long time
-    #print("E_log_pzx_val" + str(E_log_pzx_val)) 
 
     #2. Calculate entropy
     entropy = get_entropy(ALPHA, PI, GAMMA, PHI)
-    #print("entropy" + str(entropy))
 
     #3. Calculate ELBO
     elbo = E_log_pbeta_val + E_log_ptheta_val + E_log_pzx_val + entropy
@@ -272,23 +269,25 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
 
         #these multiplications take the longest
         part1 = torch.digamma(GAMMA_i_t) - torch.digamma(torch.sum(GAMMA_i_t)).unsqueeze(0) #K long vector                  
-        part2 = torch.mul(juncs.unsqueeze(-1), (torch.digamma (ALPHA_t_iter) - torch.digamma (ALPHA_t_iter+PI_t_iter))).squeeze(-1) #this operation might take a while
-        part3 = torch.mul((clusters-juncs).unsqueeze(-1), (torch.digamma (PI_t_iter) - torch.digamma (ALPHA_t_iter+PI_t_iter))).squeeze(-1)  #this operation might take a while
+        part2 = torch.mul(juncs.unsqueeze(-1), (torch.digamma(ALPHA_t_iter) - torch.digamma(ALPHA_t_iter+PI_t_iter))).squeeze(-1) #this operation might take a while
+        part3 = torch.mul((clusters-juncs).unsqueeze(-1), (torch.digamma(PI_t_iter) - torch.digamma(ALPHA_t_iter+PI_t_iter))).squeeze(-1)  #this operation might take a while
         
         part1_expanded = part1.unsqueeze(1).expand(-1, part2.shape[1], -1)  # shape: (32, 3624, 2)
-        log_PHI_i = part1_expanded + part2 + part3       
+        log_PHI_i = part1_expanded + part2 + part3    
+
+        # double check that this is correct!!    
         PHI_i = torch.exp(log_PHI_i - log_PHI_i.logsumexp(dim=-1).unsqueeze(-1)) + 1e-9 
         #renormalize every row of every cell in PHI_i
         PHI_i = PHI_i / PHI_i.sum(dim=-1).unsqueeze(-1)
         PHI_t[start_idx:end_idx] = PHI_i 
-        #print("getting ELBO using new PHI values and previous GAMMA values")
-        #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
+        print("getting ELBO using new PHI values and previous GAMMA values")
+        get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
         
         # Update GAMMA_c using the updated PHI_c
-        GAMMA_i_t = theta_prior + torch.sum(PHI_t[start_idx:end_idx], axis=1)
-        GAMMA_t[start_idx:end_idx] = GAMMA_i_t    
-        #print("getting ELBO using new GAMMA values")
-        #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
+        GAMMA_i_t_up = theta_prior + torch.sum(PHI_t[start_idx:end_idx], axis=1)
+        GAMMA_t[start_idx:end_idx] = GAMMA_i_t_up    
+        print("getting ELBO using new GAMMA values")
+        get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
 
     #calculate ELBO after GAMMA update --> seems to be lower than after PHI update so something might be wrong
     #print("Get ELBO post PHI and GAMMA updates for current batch of cells")
@@ -344,8 +343,8 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI):
     print("got the z and theta updates")
         
     ALPHA_up, PI_up = update_beta(PHI_up, GAMMA_up)
-    
     print("got the beta updates")
+
     return(ALPHA_up, PI_up, GAMMA_up, PHI_up)
 
 # %%
@@ -360,18 +359,26 @@ def calculate_CAVI(num_iterations=5):
     elbos_init = get_elbo(ALPHA_init, PI_init, GAMMA_init, PHI_init)
     elbos = []
     elbos.append(elbos_init)
+    print("Got the initial ELBO ^")
+    
     ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_init, PI_init, GAMMA_init, PHI_init)
-    print("got the first round of updates")
+    print("Got the first round of updates!")
+    
     elbo_firstup = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
     elbos.append(elbo_firstup)
-    for i in range(num_iterations):
-        while elbos[-1] > elbos[-2]:
-            print("ELBO not converged, re-running CAVI iteration # " + str(i))
-            ALPHA_new, PI_new, GAMMA_new, PHI_new = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
-            elbo = get_elbo(ALPHA_new, PI_new, GAMMA_new, PHI_new)
-            elbos.append(elbo)
-        print("ELBO converged, CAVI iteration # " + str(i) + " complete")
-    return(ALPHA_new, PI_new, GAMMA_new, PHI_new, elbos)
+    
+    print("got the first ELBO after updates ^")
+    iter = 0
+
+    while(elbos[-1] > elbos[-2]) and (iter < num_iterations):
+        print("ELBO not converged, re-running CAVI iteration # " + str(iter+1))
+        ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
+        elbo = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
+        elbos.append(elbo)
+        iter = iter + 1
+    
+    print("ELBO converged, CAVI iteration # " + str(iter+1) + " complete")
+    return(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, elbos)
 
 # %%
 if __name__ == "__main__":
@@ -382,12 +389,12 @@ if __name__ == "__main__":
     input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/junctions_full_for_LDA.pkl.pkl' #this should be an argument that gets fed in
     coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
 
-    batch_size = 4096 #should also be an argument that gets fed in
+    batch_size = 64 #should also be an argument that gets fed in
     
     #prep dataloader for training
     
     #choose random indices to subset coo_counts_sparse and coo_cluster_sparse
-    rand_ind = np.random.choice(30000, size=10230, replace=False)
+    rand_ind = np.random.choice(30000, size=500, replace=False)
 
     cell_junc_counts = data.DataLoader(CSRDataLoader(coo_counts_sparse[rand_ind], coo_cluster_sparse[rand_ind, ]), batch_size=batch_size, shuffle=False)
 
@@ -396,7 +403,7 @@ if __name__ == "__main__":
     J = cell_junc_counts.dataset[0][0].shape[0] # number of junctions
     K = 2 # should also be an argument that gets fed in
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 5 # should also be an argument that gets fed in
+    num_iters = 50 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -417,7 +424,7 @@ if __name__ == "__main__":
         lut = dict(zip(celltypes.unique(), ["r", "b", "g", "orange", "purple", "brown", "pink", "gray", "olive", "cyan"]))
         print(lut)
         row_colors = celltypes.map(lut)
-        sns.clustermap(theta_f_plot, row_colors=row_colors)
+        print(sns.clustermap(theta_f_plot, row_colors=row_colors))
 # %%
 #sort GAMMA_f 
 GAMMA_f_sort = GAMMA_f.sort(dim=1, descending=True)
@@ -446,3 +453,5 @@ variances = variances.reshape(J, K)
 #maybe just need to start out with a smaller number of junction/clusters
 
 
+# plot candidate junctions to show read counts distributions 
+# across cell states
