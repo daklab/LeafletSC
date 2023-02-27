@@ -142,7 +142,7 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI):
     ### E[log p(Z_ij|THETA_i)]    
     all_digammas = (torch.digamma(GAMMA_t) - torch.digamma(torch.sum(GAMMA_t, dim=1)).unsqueeze(1)) # shape: (N, K)
     E_log_p_xz_part1 += sum(torch.sum(PHI_t[c] @ all_digammas[c]) for c in range(PHI_t.shape[0])) #
-    
+
     ### E[log p(Y_ij | BETA, Z_ij)] BETA here defines our probability of success for every junction given a cell state
     lnBeta = (torch.digamma(ALPHA_t) - torch.digamma(ALPHA_t + PI_t)).unsqueeze(0) # shape: (1, J, K)
     ln1mBeta = (torch.digamma(PI_t) - torch.digamma(ALPHA_t + PI_t)).unsqueeze(0) # shape: (1, J, K)
@@ -158,12 +158,10 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI):
         end_idx = start_idx + batch_size
 
         if(c>0):
-            start_idx = batch_sizes[c-1]
+            start_idx = c * batch_sizes[c-1]
             end_idx = start_idx + batch_size    
 
         print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
-
-        pdb.set_trace()
 
         # Broadcast the lnBeta tensor along the batch dimension
         lnBeta_t = copy.deepcopy(lnBeta)
@@ -178,8 +176,9 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI):
         # Perform the element-wise multiplication - i think these steps take the longest
         second_term = torch.mul(lnBeta_t, juncs.unsqueeze(-1)).squeeze(-1) #shape: (32, J, K) if 32 is the batch size
         third_term = torch.mul(ln1mBeta_t, (clusters-juncs).unsqueeze(-1)).squeeze(-1) #shape: (32, J, K) if 32 is the batch size
-        E_log_p_xz_part2 += torch.sum(phi_batch * (second_term + third_term)) #check that summation dimension is correct****
-    
+     
+        E_log_p_xz_part2_add = torch.sum(phi_batch * (second_term + third_term)) #check that summation dimension is correct****
+        E_log_p_xz_part2 = E_log_p_xz_part2+E_log_p_xz_part2_add
     E_log_p_xz = E_log_p_xz_part1 + E_log_p_xz_part2
     return(E_log_p_xz)
 
@@ -197,13 +196,16 @@ def get_entropy(ALPHA, PI, GAMMA, PHI):
     beta_dist = distributions.Beta(ALPHA, PI)
     E_log_q_beta = beta_dist.entropy().mean(dim=1).sum()
     #print(E_log_q_beta)
+
     #2. Sum over all cells, entropy of dirichlet cell state proportions given its variational parameter 
     dirichlet_dist = distributions.Dirichlet(GAMMA)
     E_log_q_theta = dirichlet_dist.entropy().sum()
     #print(E_log_q_theta)
+    
     #3. Sum over all cells and junctions, entropy of  categorical PDF given its variational parameter (PHI_ij)
     E_log_q_z = -(PHI * torch.log(PHI)).sum(dim=-1).sum()
     #print(E_log_q_z)
+    
     entropy_term = E_log_q_beta + E_log_q_theta + E_log_q_z
     return entropy_term
 
@@ -240,9 +242,9 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
     GAMMA_t = copy.deepcopy(GAMMA)
     ALPHA_t = copy.deepcopy(ALPHA)
     PI_t = copy.deepcopy(PI)
-    
+    PHI_t = copy.deepcopy(PHI)
     #reset PHI_t for update
-    PHI_t = torch.ones((N, J, K)).double() / K
+    #PHI_t = torch.ones((N, J, K)).double() / K
 
     # Iterate through each cell 
     batch_sizes=[]
@@ -256,7 +258,7 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
         end_idx = start_idx + batch_size
 
         if(c>0):
-            start_idx = batch_sizes[c-1]
+            start_idx = c * batch_sizes[c-1]
             end_idx = start_idx + batch_size        
 
         print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
@@ -279,15 +281,22 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
         #renormalize every row of every cell in PHI_i
         PHI_i = PHI_i / PHI_i.sum(dim=-1).unsqueeze(-1)
         PHI_t[start_idx:end_idx] = PHI_i 
+        #print("getting ELBO using new PHI values and previous GAMMA values")
+        #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
         
         # Update GAMMA_c using the updated PHI_c
         GAMMA_i_t = theta_prior + torch.sum(PHI_t[start_idx:end_idx], axis=1)
         GAMMA_t[start_idx:end_idx] = GAMMA_i_t    
+        #print("getting ELBO using new GAMMA values")
+        #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
 
     #calculate ELBO after GAMMA update --> seems to be lower than after PHI update so something might be wrong
-    print("Get ELBO post PHI and GAMMA updates for current batch of cells")
-    get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
+    #print("Get ELBO post PHI and GAMMA updates for current batch of cells")
+    #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
 
+    # !!!!!!!!!!    
+    # ELBO decreases after this update!!!!
+    # !!!!!!!!!!
     return(PHI_t, GAMMA_t)    
 
 def update_beta(PHI, GAMMA, alpha_prior=0.65, beta_prior=0.65):
@@ -311,7 +320,7 @@ def update_beta(PHI, GAMMA, alpha_prior=0.65, beta_prior=0.65):
         end_idx = start_idx + batch_size
 
         if(c>0):
-            start_idx = batch_sizes[c-1]
+            start_idx = c * batch_sizes[c-1]
             end_idx = start_idx + batch_size   
         
         phi_values = PHI_t[start_idx:end_idx]
@@ -319,8 +328,8 @@ def update_beta(PHI, GAMMA, alpha_prior=0.65, beta_prior=0.65):
         ALPHA_t += torch.sum((juncs.unsqueeze(-1) * phi_values), dim=0) #removed prior since it's added during inintialization   
         PI_t +=  torch.sum(((clusters-juncs).unsqueeze(-1) * phi_values), dim=0) #removed prior since it's added during inintialization   
     
-    print("Get ELBO post ALPHA and PI update for ALL cells")
-    get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
+    #print("Get ELBO post ALPHA and PI update for ALL cells")
+    #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
     return(ALPHA_t, PI_t)
 
 # %%   
@@ -337,7 +346,6 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI):
     ALPHA_up, PI_up = update_beta(PHI_up, GAMMA_up)
     
     print("got the beta updates")
-    get_elbo(ALPHA_up, PI_up, GAMMA_up, PHI_up)
     return(ALPHA_up, PI_up, GAMMA_up, PHI_up)
 
 # %%
@@ -349,18 +357,20 @@ def calculate_CAVI(num_iterations=5):
     '''
 
     ALPHA_init, PI_init, GAMMA_init, PHI_init = init_var_params()
-    elbo = get_elbo(ALPHA_init, PI_init, GAMMA_init, PHI_init)
+    elbos_init = get_elbo(ALPHA_init, PI_init, GAMMA_init, PHI_init)
+    elbos = []
+    elbos.append(elbos_init)
     ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_init, PI_init, GAMMA_init, PHI_init)
     print("got the first round of updates")
-    elbos = []
-    elbo = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
-    elbos.append(elbo)
+    elbo_firstup = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
+    elbos.append(elbo_firstup)
     for i in range(num_iterations):
-        print(i)
-        ALPHA_new, PI_new, GAMMA_new, PHI_new = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
-        elbo = get_elbo(ALPHA_new, PI_new, GAMMA_new, PHI_new)
-        elbos.append(elbo)
-        
+        while elbos[-1] > elbos[-2]:
+            print("ELBO not converged, re-running CAVI iteration # " + str(i))
+            ALPHA_new, PI_new, GAMMA_new, PHI_new = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
+            elbo = get_elbo(ALPHA_new, PI_new, GAMMA_new, PHI_new)
+            elbos.append(elbo)
+        print("ELBO converged, CAVI iteration # " + str(i) + " complete")
     return(ALPHA_new, PI_new, GAMMA_new, PHI_new, elbos)
 
 # %%
@@ -372,14 +382,14 @@ if __name__ == "__main__":
     input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/junctions_full_for_LDA.pkl.pkl' #this should be an argument that gets fed in
     coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
 
-    batch_size = 512 #should also be an argument that gets fed in
+    batch_size = 4096 #should also be an argument that gets fed in
     
     #prep dataloader for training
     
     #choose random indices to subset coo_counts_sparse and coo_cluster_sparse
-    rand_ind = np.random.choice(30000, size=1023, replace=False)
+    rand_ind = np.random.choice(30000, size=10230, replace=False)
 
-    cell_junc_counts = data.DataLoader(CSRDataLoader(coo_counts_sparse[rand_ind], coo_cluster_sparse[rand_ind, ]), batch_size=batch_size, shuffle=True)
+    cell_junc_counts = data.DataLoader(CSRDataLoader(coo_counts_sparse[rand_ind], coo_cluster_sparse[rand_ind, ]), batch_size=batch_size, shuffle=False)
 
     # global variables
     N = len(cell_junc_counts.dataset) # number of cells
