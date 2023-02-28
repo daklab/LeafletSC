@@ -194,7 +194,7 @@ def main(junc_files, gtf_file, setting, output):
         clusters_wnomultiple_events=clusters_wnomultiple_events[(clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.Start) & (clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.End)].Cluster
         clusters_df = clusters_df[clusters_df['Cluster'].isin(clusters_wnomultiple_events) == False]
     
-    #ensure that every junction is only attributed to one gene's intron cluster 
+    # ensure that every junction is only attributed to one gene's intron cluster 
     assert((clusters_df.groupby(['Cluster'])["gene_id"].nunique().reset_index().gene_id.unique() == 1))
 
     df=df[df.junction_id.isin(clusters_df["junction_id"])] 
@@ -206,22 +206,30 @@ def main(junc_files, gtf_file, setting, output):
     gr = gr.drop_duplicate_positions()
     gr.to_bed("extracted_junction_coordinates.bed", chain=True) #add option to add prefix to file name
 
-    #summary number of junctions per cluster 
+    # summary number of junctions per cluster 
     summ_clusts_juncs=clusters[["Cluster", "junction_id"]].drop_duplicates().groupby("Cluster")["junction_id"].count().reset_index()
     summ_clusts_juncs = summ_clusts_juncs.sort_values("junction_id", ascending=False)
 
-    #check if junction doesn't belong to more than 1 cluster 
+    # check if junction doesn't belong to more than 1 cluster 
     juncs_clusts = clusters.groupby("junction_id")["Cluster"].count().reset_index()
 
-    # for now keep those junctions, might be in regions where there are multiple 
+    # for now remove those junctions, might be in regions where there are multiple 
     # overlapping genes so would be hard to decipher anyhow 
     # can look in more detail at this later at some point 
-    # for now just report them so user knows to be more careful with them, the clustering is also done on gene level
+    # for now just report them first so user knows to be more careful with them, the clustering is also done on gene level
+    print("Found junctions that belong to more than one cluster, these are:")
     print(juncs_clusts[juncs_clusts["Cluster"] > 1])
+    print("These are removed from the final results")
 
-    #combine cell junction counts with info on junctions and clusters 
+    # remove clusters that have junctions that belong to more than one cluster
+    clusters = clusters[clusters.Cluster.isin(juncs_clusts[juncs_clusts["Cluster"] > 1].Cluster) == False]
+
+    # combine cell junction counts with info on junctions and clusters 
     df=pd.merge(clusters, df, on = "junction_id")
     print("The number of clusters to be finally evaluated is " + str(len(df.Cluster.unique()))) 
+    
+    # confirm that every junction is only attributed to one cluster
+    print(juncs_clusts[juncs_clusts["Cluster"] > 1])
 
     #save this file and return (main output from script)
     df.to_csv(output, index=False, sep="}")  #find alterantive more efficient way to save this file, pickl file?

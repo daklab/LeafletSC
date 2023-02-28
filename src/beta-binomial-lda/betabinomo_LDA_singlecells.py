@@ -87,8 +87,8 @@ def init_var_params(J, K, N, eps = 1e-2):
     PI = torch.from_numpy(np.random.uniform(0.01, 0.99, size=(J, K)))
 
     # Topic Proportions (cell states proportions), GAMMA ~ Dirichlet(eta) 
-    #GAMMA = (torch.rand((N, K)).double() + eps) * 100
-    GAMMA = torch.ones((N, K)).double() #* 100
+    GAMMA = (torch.rand((N, K)).double() + eps) * 100
+    #GAMMA = torch.ones((N, K)).double() #* 100
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
     PHI = torch.rand((N, J, K)).double() + eps
@@ -342,10 +342,10 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, cell_junc_counts)
     '''
 
     PHI_up, GAMMA_up = update_z_theta(ALPHA, PI, GAMMA, PHI, cell_junc_counts) #slowest part#*****
-    print("got the z and theta updates")
+    print("got the PHI and GAMMA updates")
         
     ALPHA_up, PI_up = update_beta(J, K , PHI_up, GAMMA_up, cell_junc_counts)
-    print("got the beta updates")
+    print("got the ALPHA and PI updates")
 
     return(ALPHA_up, PI_up, GAMMA_up, PHI_up)
 
@@ -396,7 +396,7 @@ if __name__ == "__main__":
     #prep dataloader for training
     
     #choose random indices to subset coo_counts_sparse and coo_cluster_sparse
-    rand_ind = np.random.choice(16585, size=10000, replace=False)
+    rand_ind = np.random.choice(16585, size=16000, replace=False)
 
     cell_junc_counts = data.DataLoader(CSRDataLoader(coo_counts_sparse[rand_ind], coo_cluster_sparse[rand_ind, ]), batch_size=batch_size, shuffle=False)
 
@@ -405,7 +405,7 @@ if __name__ == "__main__":
     J = cell_junc_counts.dataset[0][0].shape[0] # number of junctions
     K = 2 # should also be an argument that gets fed in
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 12 # should also be an argument that gets fed in
+    num_iters = 5 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -457,3 +457,13 @@ if __name__ == "__main__":
 
 # plot candidate junctions to show read counts distributions 
 # across cell states
+
+# %%
+
+rand_ind
+
+coo_counts_sparse[rand_ind]
+coo_cluster_sparse[rand_ind]
+
+cell_ids_conversion 
+junction_ids_conversion
