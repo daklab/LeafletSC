@@ -1,3 +1,5 @@
+# betabinomo_LDA_singlecells.py>
+
 # %%
 import torch
 import torch.utils.data as data 
@@ -15,6 +17,8 @@ import copy
 from scipy.sparse import coo_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
+from tqdm import tqdm
+from time import sleep
 
 torch.manual_seed(42)
 
@@ -42,7 +46,8 @@ def load_cluster_data(input_file):
     summarized_data = pd.read_pickle(input_file)
 
     #for now just look at B and T cells
-    summarized_data = summarized_data[summarized_data["cell_type"].isin(["B", "CD8T", "MemoryCD4T"])]
+    summarized_data = summarized_data[summarized_data["cell_type"].isin(["NaiveCD4T", "CD14Mono", "FCGR3A"])]
+    print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
 
@@ -67,7 +72,7 @@ def load_cluster_data(input_file):
 
 # Functions for probabilistic beta-binomial AS model 
 
-def init_var_params(eps = 1e-2):
+def init_var_params(J, K, N, eps = 1e-2):
     
     '''
     Function for initializing variational parameters using global variables N, J, K   
@@ -119,12 +124,12 @@ def E_log_ptheta(GAMMA, eta=0.1):
     GAMMA is a variational parameter assigned to each cell, follows a K dirichlet
     '''
 
-    E_log_p_theta = torch.sum((eta - 1) * sum(torch.digamma (GAMMA).T - torch.digamma (torch.sum(GAMMA, dim=1))))
+    E_log_p_theta = torch.sum((eta - 1) * sum(torch.digamma(GAMMA).T - torch.digamma(torch.sum(GAMMA, dim=1))))
     assert(~(np.isnan(E_log_p_theta)))
     return(E_log_p_theta)
 
 # %%
-def E_log_xz(ALPHA, PI, GAMMA, PHI):
+def E_log_xz(ALPHA, PI, GAMMA, PHI, cell_junc_counts):
     
     '''
     sum over N cells and J junctions... where we are looking at the exp log p(z|theta)
@@ -150,7 +155,7 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI):
 
     batch_sizes = []
 
-    for c, (juncs, clusters) in enumerate(cell_junc_counts): #cell_junc_counts is a dataloader object
+    for c, (juncs, clusters) in enumerate(tqdm(cell_junc_counts)): #cell_junc_counts is a dataloader object
 
         batch_size = juncs.size(0)
         batch_sizes.append(batch_size)
@@ -162,7 +167,7 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI):
             start_idx = c * batch_sizes[c-1]
             end_idx = start_idx + batch_size    
 
-        print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
+        #print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
 
         # Broadcast the lnBeta tensor along the batch dimension
         lnBeta_t = copy.deepcopy(lnBeta)
@@ -212,12 +217,12 @@ def get_entropy(ALPHA, PI, GAMMA, PHI):
 
 # %%
 
-def get_elbo(ALPHA, PI, GAMMA, PHI):
+def get_elbo(ALPHA, PI, GAMMA, PHI, cell_junc_counts):
     
     #1. Calculate expected log joint
     E_log_pbeta_val = E_log_pbeta(ALPHA, PI)
     E_log_ptheta_val = E_log_ptheta(GAMMA)
-    E_log_pzx_val = E_log_xz(ALPHA, PI, GAMMA, PHI) #**this step takes a long time
+    E_log_pzx_val = E_log_xz(ALPHA, PI, GAMMA, PHI, cell_junc_counts) #**this step takes a long time
 
     #2. Calculate entropy
     entropy = get_entropy(ALPHA, PI, GAMMA, PHI)
@@ -231,7 +236,7 @@ def get_elbo(ALPHA, PI, GAMMA, PHI):
 
 # %%
 
-def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
+def update_z_theta(ALPHA, PI, GAMMA, PHI, cell_junc_counts, theta_prior=0.1):
 
     '''
     Update variational parameters for z and theta distributions
@@ -246,7 +251,7 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
     # Iterate through each cell 
     batch_sizes=[]
 
-    for c, (juncs, clusters) in enumerate(cell_junc_counts):
+    for c, (juncs, clusters) in enumerate(tqdm(cell_junc_counts)):
         
         batch_size = juncs.size(0)
         batch_sizes.append(batch_size)
@@ -258,7 +263,7 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
             start_idx = c * batch_sizes[c-1]
             end_idx = start_idx + batch_size        
 
-        print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
+        #print("working on cells " + str(start_idx) + " to " + str(end_idx) + " of " + str(N) + " cells")
 
         # Get GAMMA for that cell and for this iteration so that PHI can be updated 
         GAMMA_i_t = (GAMMA_t[start_idx:end_idx]) # K-vector 
@@ -280,25 +285,22 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, theta_prior=0.1):
         #renormalize every row of every cell in PHI_i
         PHI_i = PHI_i / PHI_i.sum(dim=-1).unsqueeze(-1)
         PHI_t[start_idx:end_idx] = PHI_i 
-        print("getting ELBO using new PHI values and previous GAMMA values")
-        get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
+        #print("getting ELBO using new PHI values and previous GAMMA values")
+        #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
         
         # Update GAMMA_c using the updated PHI_c
         GAMMA_i_t_up = theta_prior + torch.sum(PHI_t[start_idx:end_idx], axis=1)
         GAMMA_t[start_idx:end_idx] = GAMMA_i_t_up    
-        print("getting ELBO using new GAMMA values")
-        get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
+        #print("getting ELBO using new GAMMA values")
+        #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
 
     #calculate ELBO after GAMMA update --> seems to be lower than after PHI update so something might be wrong
     #print("Get ELBO post PHI and GAMMA updates for current batch of cells")
     #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
 
-    # !!!!!!!!!!    
-    # ELBO decreases after this update!!!!
-    # !!!!!!!!!!
     return(PHI_t, GAMMA_t)    
 
-def update_beta(PHI, GAMMA, alpha_prior=0.65, beta_prior=0.65):
+def update_beta(J, K, PHI, GAMMA, cell_junc_counts, alpha_prior=0.65, beta_prior=0.65):
     
     '''
     Update variational parameters for beta distribution
@@ -333,38 +335,38 @@ def update_beta(PHI, GAMMA, alpha_prior=0.65, beta_prior=0.65):
 
 # %%   
 
-def update_variational_parameters(ALPHA, PI, GAMMA, PHI):
+def update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, cell_junc_counts):
     
     '''
     Update variational parameters for beta, theta and z distributions
     '''
 
-    PHI_up, GAMMA_up = update_z_theta(ALPHA, PI, GAMMA, PHI) #slowest part#*****
+    PHI_up, GAMMA_up = update_z_theta(ALPHA, PI, GAMMA, PHI, cell_junc_counts) #slowest part#*****
     print("got the z and theta updates")
         
-    ALPHA_up, PI_up = update_beta(PHI_up, GAMMA_up)
+    ALPHA_up, PI_up = update_beta(J, K , PHI_up, GAMMA_up, cell_junc_counts)
     print("got the beta updates")
 
     return(ALPHA_up, PI_up, GAMMA_up, PHI_up)
 
 # %%
 
-def calculate_CAVI(num_iterations=5):
+def calculate_CAVI(J, K, N, cell_junc_counts, num_iterations=5):
     
     '''
     Calculate CAVI
     '''
 
-    ALPHA_init, PI_init, GAMMA_init, PHI_init = init_var_params()
-    elbos_init = get_elbo(ALPHA_init, PI_init, GAMMA_init, PHI_init)
+    ALPHA_init, PI_init, GAMMA_init, PHI_init = init_var_params(J, K, N)
+    elbos_init = get_elbo(ALPHA_init, PI_init, GAMMA_init, PHI_init, cell_junc_counts)
     elbos = []
     elbos.append(elbos_init)
     print("Got the initial ELBO ^")
     
-    ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_init, PI_init, GAMMA_init, PHI_init)
+    ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_init, PI_init, GAMMA_init, PHI_init, J, K, cell_junc_counts)
     print("Got the first round of updates!")
     
-    elbo_firstup = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
+    elbo_firstup = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, cell_junc_counts)
     elbos.append(elbo_firstup)
     
     print("got the first ELBO after updates ^")
@@ -372,8 +374,8 @@ def calculate_CAVI(num_iterations=5):
 
     while(elbos[-1] > elbos[-2]) and (iter < num_iterations):
         print("ELBO not converged, re-running CAVI iteration # " + str(iter+1))
-        ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
-        elbo = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi)
+        ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, J, K, cell_junc_counts)
+        elbo = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, cell_junc_counts)
         elbos.append(elbo)
         iter = iter + 1
     
@@ -389,12 +391,12 @@ if __name__ == "__main__":
     input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/junctions_full_for_LDA.pkl.pkl' #this should be an argument that gets fed in
     coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
 
-    batch_size = 64 #should also be an argument that gets fed in
+    batch_size = 2048 #should also be an argument that gets fed in
     
     #prep dataloader for training
     
     #choose random indices to subset coo_counts_sparse and coo_cluster_sparse
-    rand_ind = np.random.choice(30000, size=500, replace=False)
+    rand_ind = np.random.choice(16585, size=10000, replace=False)
 
     cell_junc_counts = data.DataLoader(CSRDataLoader(coo_counts_sparse[rand_ind], coo_cluster_sparse[rand_ind, ]), batch_size=batch_size, shuffle=False)
 
@@ -403,7 +405,7 @@ if __name__ == "__main__":
     J = cell_junc_counts.dataset[0][0].shape[0] # number of junctions
     K = 2 # should also be an argument that gets fed in
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 50 # should also be an argument that gets fed in
+    num_iters = 12 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -411,7 +413,7 @@ if __name__ == "__main__":
         # run coordinate ascent VI
         print(K)
 
-        ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = calculate_CAVI(num_iters)
+        ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = calculate_CAVI(J, K, N, cell_junc_counts, num_iters)
         juncs_probs = ALPHA_f / (ALPHA_f+PI_f)
         theta_f = distributions.Dirichlet(GAMMA_f).sample().numpy()
         z_f = distributions.Categorical(PHI_f).sample()
@@ -427,13 +429,13 @@ if __name__ == "__main__":
         print(sns.clustermap(theta_f_plot, row_colors=row_colors))
 # %%
 #sort GAMMA_f 
-GAMMA_f_sort = GAMMA_f.sort(dim=1, descending=True)
+#GAMMA_f_sort = GAMMA_f.sort(dim=1, descending=True)
 
 # for bimodal distribution mean might not be the best way to compare them since most density lies at the two tails 
 
 # Calculate the variances for each of the 3624 junctions
-variances = (ALPHA_f * PI_f) / ((ALPHA_f + PI_f) ** 2 * (ALPHA_f + PI_f + 1))
-variances = variances.reshape(J, K)
+#variances = (ALPHA_f * PI_f) / ((ALPHA_f + PI_f) ** 2 * (ALPHA_f + PI_f + 1))
+#variances = variances.reshape(J, K)
 
 # use symmetric KL divergence, take mean of each calculation both ways to compare 
 # Beta distributions 
