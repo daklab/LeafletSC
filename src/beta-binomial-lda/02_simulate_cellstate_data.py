@@ -71,10 +71,17 @@ class JunctionClusterCounts():
         #given probability of success for each junction given the assigned cell state, 
         # sample counts using a binomial distribution
         self.counts = torch.zeros(num_cells, num_junctions)
-        
-        # generate unique number of trials for each junction in every cell
-        self.num_trials = torch.randint(low=0, high=5, size=(num_cells, num_junctions))
 
+        # generate unique number of trials for each junction in every cell
+        # most of these should be zeroes 
+        num_trials = torch.zeros(num_cells, num_junctions)
+        num_elements = num_cells * num_junctions
+        num_non_zero = int(0.01 * num_elements)
+        indices = torch.randperm(num_elements)[:num_non_zero]
+        num_trials.view(-1)[indices] =torch.randint(low=1, high=10, size=(num_non_zero,)).float()
+        self.num_trials = num_trials
+    
+    # this is not technically necessary because state_params already has this infor 
     def generate_beta_params(self, state_params: Dict):
         alpha_params = torch.zeros(self.num_states, self.num_junctions)
         beta_params = torch.zeros(self.num_states, self.num_junctions)
@@ -83,37 +90,21 @@ class JunctionClusterCounts():
             beta_params[state_idx] = state_params[state_idx]["beta"]
         return alpha_params, beta_params
     
-    #def simulate_counts_vec(self):
-    #    
-    #    # compute state probabilities for all cells at once
-    #    state_probs = self.theta / self.theta.sum(dim=1, keepdim=True)
-#
-    #    # sample state indices for all cells and junctions at once
-    #    state_indices = torch.multinomial(state_probs, self.num_junctions)
-#
-    #    # compute junction probabilities for all cells and junctions at once
-    #    junction_probs = torch.distributions.beta.Beta(
-    #        self.alpha_params[state_indices, torch.arange(self.num_junctions)] , 
-    #        self.beta_params[state_indices, torch.arange(self.num_junctions)]).sample()
-#
-    #    # compute counts for all cells and junctions at once
-    #    counts = torch.distributions.binomial.Binomial(
-    #        total_count=self.num_trials, probs=junction_probs).sample()
-#
-    #    # assign the results to the instance variables
-    #    self.Z = state_indices
-    #    self.counts = counts
+    # rewrite simulate_counts without forloops [to-do] **
 
     def simulate_counts(self):
         for cell_idx in tqdm(range(self.num_cells)):
             for j_idx in (range(self.num_junctions)):
                 state_probs = self.theta[cell_idx]
                 state_probs /= state_probs.sum()
+                #sample a cell state label for each junction
                 state_idx = torch.multinomial(state_probs, 1).item()
                 self.Z[cell_idx, j_idx] = state_idx
+                #sample a probability(success) for junction in given cell state
                 junction_probs = torch.distributions.beta.Beta(
                     self.alpha_params[state_idx, j_idx], 
                     self.beta_params[state_idx, j_idx]).sample()
+                #sample junction counts given probability of success and total number of reads in cluster 
                 counts = torch.distributions.binomial.Binomial(
                     total_count=self.num_trials[cell_idx, j_idx], probs=junction_probs).sample()
                 self.counts[cell_idx, j_idx] = counts
@@ -124,14 +115,14 @@ class JunctionClusterCounts():
 
 import random
 
-num_states = 3
-num_junctions = 500
+num_states = 2
+num_junctions = 200
 num_cells = 1000
 
 state_params = {}
 for i in range(num_states):
-    alpha = torch.tensor([random.uniform(1.0, 10.0) for _ in range(num_junctions)])
-    beta = torch.tensor([random.uniform(1.0, 10.0) for _ in range(num_junctions)])
+    alpha = torch.tensor([random.uniform(0.01, 1) for _ in range(num_junctions)])
+    beta = torch.tensor([random.uniform(0.01, 1) for _ in range(num_junctions)])
     state_params[i] = {'alpha': alpha, 'beta': beta}
 
 print(state_params)
@@ -191,10 +182,5 @@ if __name__ == "__main__":
         sns.scatterplot(x=theta_f_plot[1], y=og_theta_plot[1])
         plt.xlabel('Estimated')
         plt.ylabel('Simulated')
-
-        sns.scatterplot(x=theta_f_plot[2], y=og_theta_plot[2])
-        plt.xlabel('Estimated')
-        plt.ylabel('Simulated')
-
 
 # %%

@@ -460,10 +460,12 @@ if __name__ == "__main__":
 
 # %%
 
-rand_ind
+#rand_ind
 
-coo_counts_sparse[rand_ind]
-coo_cluster_sparse[rand_ind]
+#coo_counts_sparse[rand_ind]
+#coo_cluster_sparse[rand_ind]
 
-cell_ids_conversion 
-junction_ids_conversion
+#cell_ids_conversion 
+#junction_ids_conversion
+
+#coo_counts_sparse[rand_ind][:,27953].transpose().toarray()
