@@ -46,27 +46,45 @@ def load_cluster_data(input_file):
     summarized_data = pd.read_pickle(input_file)
 
     #for now just look at B and T cells
-    summarized_data = summarized_data[summarized_data["cell_type"].isin(["NaiveCD4T", "CD14Mono", "FCGR3A"])]
+    summarized_data = summarized_data[summarized_data["cell_type"].isin(["B", "CD8T", "MemoryCD4T", "NaiveCD4T"])]
     print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
 
+    # print histogram of junction ratios with x-axis label color by cell type 
+    plt.figure(figsize=(10, 5))
+    plt.title("Histogram of Junction Ratios")
+
+    for cell_type in summarized_data.cell_type.unique():
+        plt.hist(summarized_data[summarized_data["cell_type"] == cell_type]["junc_ratio"], bins=10, alpha=0.3, label=cell_type)
+        plt.legend()
+    plt.xlabel("Junction Ratio")
+    plt.ylabel("Frequency")
+    plt.show()
+
     coo = summarized_data[["cell_id_index", "junction_id_index", "junc_count", "Cluster_Counts", "Cluster", "junc_ratio"]]
 
+    # just some sanity checks 
     cell_ids_conversion = summarized_data[["cell_id_index", "cell_id", "cell_type"]].drop_duplicates()
+    cell_ids_conversion = cell_ids_conversion.sort_values("cell_id_index")
+
     junction_ids_conversion = summarized_data[["junction_id_index", "junction_id", "Cluster"]].drop_duplicates()
     junction_ids_conversion = junction_ids_conversion.sort_values("junction_id_index")
-    cell_ids_conversion = cell_ids_conversion.sort_values("cell_id_index")
 
     #make coo_matrix for junction counts and cluster counts 
     coo_counts_sparse = coo_matrix((coo.junc_count, (coo.cell_id_index, coo.junction_id_index)), shape=(len(coo.cell_id_index.unique()), len(coo.junction_id_index.unique())))
-    coo_cluster_sparse = coo_matrix((coo.Cluster_Counts, (coo.cell_id_index, coo.junction_id_index)), shape=(len(coo.cell_id_index.unique()), len(coo.junction_id_index.unique())))
+    #coo_cluster_sparse = coo_matrix((coo.Cluster_Counts, (coo.cell_id_index, coo.junction_id_index)), shape=(len(coo.cell_id_index.unique()), len(coo.junction_id_index.unique())))
 
     #convert to csr_matrix format 
     coo_counts_sparse = coo_counts_sparse.tocsr()
     coo_cluster_sparse = coo_cluster_sparse.tocsr()
 
-    return(coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion)
+    cells_only = coo[["cell_id_index", "Cluster", "Cluster_Counts"]]
+    cells_only = cells_only.drop_duplicates()
+    merged_df = pd.merge(cells_only, junction_ids_conversion)
+    coo_cluster_sparse = coo_matrix((merged_df.Cluster_Counts, (merged_df.cell_id_index, merged_df.junction_id_index)), shape=(len(merged_df.cell_id_index.unique()), len(merged_df.junction_id_index.unique())))
+
+    return(coo, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion)
 
 # %% 
 
@@ -329,6 +347,12 @@ def update_beta(J, K, PHI, GAMMA, cell_junc_counts, alpha_prior=0.65, beta_prior
     PI_t = torch.ones((J, K)) * beta_prior
     batch_sizes = []
 
+    # how to do this without dense arrays with zeroes 
+    # only calculate for nonzero cluster junctions in each cell 
+    # right now my dataframe only has nonzero JUNCTIONS 
+    # but i want to include zero count junctions if their cluster has a nonzero count
+
+
     for c, (juncs, clusters) in enumerate(cell_junc_counts):
         batch_size = juncs.size(0)
         batch_sizes.append(batch_size)
@@ -405,7 +429,7 @@ if __name__ == "__main__":
     # get input data (this is standard output from leafcutter-sc pipeline so the column names will always be the same)
     
     input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/junctions_full_for_LDA.pkl.pkl' #this should be an argument that gets fed in
-    coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
+    nonzero, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
 
     batch_size = 512 #should also be an argument that gets fed in
     

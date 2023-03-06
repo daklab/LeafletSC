@@ -171,7 +171,7 @@ class JunctionClusterCounts():
 
 num_states = 3
 num_junctions = 5000
-num_cells = 500
+num_cells = 750
 
 # create an instance of the JunctionClusterCounts class
 jc_counts = JunctionClusterCounts(num_cells, num_junctions, num_states)
@@ -235,7 +235,7 @@ if __name__ == "__main__":
     J = cell_junc_counts.dataset[0][0].shape[0] # number of junctions
     K = num_states
     num_trials = 1 
-    num_iters = 300
+    num_iters = 1000
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -263,5 +263,5 @@ print(sns.jointplot(x = og_theta_plot[0],y = theta_f_plot[0]))
 print(sns.jointplot(x = og_theta_plot[1],y = theta_f_plot[1]))
 
 # plot ELBOs 
-plt.plot(elbos_all)
+plt.plot(elbos_all[1:])
 # %%
