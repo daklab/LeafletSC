@@ -391,12 +391,12 @@ if __name__ == "__main__":
     input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/junctions_full_for_LDA.pkl.pkl' #this should be an argument that gets fed in
     coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
 
-    batch_size = 2048 #should also be an argument that gets fed in
+    batch_size = 512 #should also be an argument that gets fed in
     
     #prep dataloader for training
     
     #choose random indices to subset coo_counts_sparse and coo_cluster_sparse
-    rand_ind = np.random.choice(16585, size=16000, replace=False)
+    rand_ind = np.random.choice(16585, size=2000, replace=False)
 
     cell_junc_counts = data.DataLoader(CSRDataLoader(coo_counts_sparse[rand_ind], coo_cluster_sparse[rand_ind, ]), batch_size=batch_size, shuffle=False)
 

@@ -10,7 +10,6 @@ import pdb
 
 import pandas as pd
 import numpy as np
-import copy
 
 from scipy.sparse import coo_matrix
 import matplotlib.pyplot as plt
@@ -19,6 +18,9 @@ from tqdm import tqdm
 from time import sleep
 from scipy.sparse import csr_matrix
 from typing import Dict
+import scanpy as sc
+import anndata as ad
+import scipy
 
 torch.manual_seed(42)
 
@@ -35,6 +37,7 @@ torch.manual_seed(42)
 
 # simulate Beta_k=1 to look very different from Beta_k=2
 
+# %% 
 # Define data classes 
 class Simulate_DataLoader():
     
@@ -54,16 +57,20 @@ class Simulate_DataLoader():
 
 class JunctionClusterCounts():
     
-    def __init__(self, num_cells: int, num_junctions: int, num_states: int, state_params: Dict):
+    def __init__(self, num_cells: int, num_junctions: int, num_states: int):
         self.num_cells = num_cells
         self.num_junctions = num_junctions
         self.num_states = num_states
         
         # sample parameters for beta distributions for each state
-        self.alpha_params, self.beta_params = self.generate_beta_params(state_params)
+        self.alpha_params, self.beta_params = self.generate_beta_params()
         
         # sample proportions of cell states 
-        self.theta = torch.rand(num_cells, num_states)
+        tensor = torch.zeros((num_cells, num_states))
+        indices = torch.randint(num_states, size=(num_cells,))
+        # set the value of the selected index to 1
+        tensor[torch.arange(num_cells), indices] = 1
+        self.theta = tensor
         
         #sample labels for junctions (which cell state they get assigned to given the proportions)
         self.Z = torch.zeros(num_cells, num_junctions, dtype=torch.long)
@@ -71,67 +78,137 @@ class JunctionClusterCounts():
         #given probability of success for each junction given the assigned cell state, 
         # sample counts using a binomial distribution
         self.counts = torch.zeros(num_cells, num_junctions)
+        self.tot_counts = torch.zeros(num_cells)
 
         # generate unique number of trials for each junction in every cell
         # most of these should be zeroes 
         num_trials = torch.zeros(num_cells, num_junctions)
         num_elements = num_cells * num_junctions
-        num_non_zero = int(0.01 * num_elements)
+        num_non_zero = int(0.05 * num_elements)
         indices = torch.randperm(num_elements)[:num_non_zero]
-        num_trials.view(-1)[indices] =torch.randint(low=1, high=10, size=(num_non_zero,)).float()
+        num_trials.view(-1)[indices] =torch.randint(low=1, high=7, size=(num_non_zero,)).float()
         self.num_trials = num_trials
     
-    # this is not technically necessary because state_params already has this infor 
-    def generate_beta_params(self, state_params: Dict):
+    def generate_beta_params(self):
+        
         alpha_params = torch.zeros(self.num_states, self.num_junctions)
         beta_params = torch.zeros(self.num_states, self.num_junctions)
-        for state_idx in range(self.num_states):
-            alpha_params[state_idx] = state_params[state_idx]["alpha"]
-            beta_params[state_idx] = state_params[state_idx]["beta"]
-        return alpha_params, beta_params
     
+        # Assign junctions to each state
+        junction_states = torch.randint(low=0, high=self.num_states, size=(self.num_junctions,))
+    
+        for state_idx in range(self.num_states):
+            # Select only the junctions assigned to this state
+            state_junctions = (junction_states == state_idx).nonzero(as_tuple=True)[0]
+
+            # Set p(success) close to 1 for state_junctions
+            alpha_params[state_idx, state_junctions] = torch.ones(len(state_junctions)).uniform_(0.99, 1.0)
+            beta_params[state_idx, state_junctions] = torch.ones(len(state_junctions)).uniform_(0.01, 0.1)
+
+            # Set p(success) close to 0 for non-state_junctions
+            non_state_junctions = (junction_states != state_idx).nonzero(as_tuple=True)[0]
+            alpha_params[state_idx, non_state_junctions] = torch.ones(len(non_state_junctions)).uniform_(0.01, 0.1)
+            beta_params[state_idx, non_state_junctions] = torch.ones(len(non_state_junctions)).uniform_(0.99, 1.0)
+
+        return alpha_params, beta_params
+
     # rewrite simulate_counts without forloops [to-do] **
 
+    #def simulate_counts(self):
+    #    for cell_idx in tqdm(range(self.num_cells)):
+    #        for j_idx in (range(self.num_junctions)):
+    #            state_probs = self.theta[cell_idx]
+    #            state_probs /= state_probs.sum()
+    #            #sample a cell state label for each junction
+    #            state_idx = torch.multinomial(state_probs, 1).item()
+    #            self.Z[cell_idx, j_idx] = state_idx
+    #            #sample a probability(success) for junction in given cell state
+    #            junction_probs = torch.distributions.beta.Beta(
+    #                self.alpha_params[state_idx, j_idx], 
+    #                self.beta_params[state_idx, j_idx]).sample()
+    #            #sample junction counts given probability of success and total number of reads in cluster 
+    #            counts = torch.distributions.binomial.Binomial(
+    #                total_count=self.num_trials[cell_idx, j_idx], probs=junction_probs).sample()
+    #            self.counts[cell_idx, j_idx] = counts
+
     def simulate_counts(self):
-        for cell_idx in tqdm(range(self.num_cells)):
-            for j_idx in (range(self.num_junctions)):
-                state_probs = self.theta[cell_idx]
-                state_probs /= state_probs.sum()
-                #sample a cell state label for each junction
-                state_idx = torch.multinomial(state_probs, 1).item()
-                self.Z[cell_idx, j_idx] = state_idx
-                #sample a probability(success) for junction in given cell state
-                junction_probs = torch.distributions.beta.Beta(
-                    self.alpha_params[state_idx, j_idx], 
-                    self.beta_params[state_idx, j_idx]).sample()
-                #sample junction counts given probability of success and total number of reads in cluster 
-                counts = torch.distributions.binomial.Binomial(
-                    total_count=self.num_trials[cell_idx, j_idx], probs=junction_probs).sample()
-                self.counts[cell_idx, j_idx] = counts
+
+        # Calculate state probabilities for all cells
+        state_probs = self.theta / self.theta.sum(dim=1, keepdim=True)
+
+        # Sample a cell state label for each junction in each cell
+        state_idx = torch.multinomial(state_probs, num_samples=1, replacement=False)
+
+        # Calculate beta distribution parameters for all junctions and cell states
+        alpha = self.alpha_params[state_idx, torch.arange(self.num_junctions)]
+        beta = self.beta_params[state_idx, torch.arange(self.num_junctions)]
+
+        # Sample junction probabilities for all junctions and cell states
+        junction_probs = torch.distributions.beta.Beta(alpha, beta).sample()
+
+        # Sample counts for all junctions and cell states
+        counts = torch.distributions.binomial.Binomial(
+            total_count=self.num_trials, probs=junction_probs).sample()
+
+        # Store the results in the self.Z and self.counts tensors
+        # This ends up being basically a simple mixed model rather than mixed membership 
+        # So every junction in the same cell will have the same Z value
+        self.Z = state_idx
+        self.counts = counts
+
+    def get_total_counts(self):
+        tot_counts=self.counts.sum(dim=1)
+        self.tot_counts = tot_counts
 
 # %%
 # Define parameters for simulation of cell states via beta distributions
 #________________________________________________________________________________________________________________
 
-import random
-
 num_states = 2
-num_junctions = 200
-num_cells = 1000
-
-state_params = {}
-for i in range(num_states):
-    alpha = torch.tensor([random.uniform(0.01, 1) for _ in range(num_junctions)])
-    beta = torch.tensor([random.uniform(0.01, 1) for _ in range(num_junctions)])
-    state_params[i] = {'alpha': alpha, 'beta': beta}
-
-print(state_params)
+num_junctions = 3000
+num_cells = 5000
 
 # create an instance of the JunctionClusterCounts class
-jc_counts = JunctionClusterCounts(num_cells, num_junctions, num_states, state_params)
+jc_counts = JunctionClusterCounts(num_cells, num_junctions, num_states)
 
 # simulate counts
 jc_counts.simulate_counts()
+jc_counts.get_total_counts()
+
+# %%
+#create COO matrix 
+#https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.coo_matrix.html
+
+# make coo_matrix from jc_counts.count first convert from tensor to pandas dataframe
+junc_counts = jc_counts.counts.numpy()
+cluster_counts = jc_counts.num_trials.numpy()
+junc_ratios = junc_counts / cluster_counts
+thetas = pd.DataFrame(jc_counts.theta.numpy())
+# extract cell state labels from theta
+indicator_vector = thetas.idxmax(axis=1)
+
+# Make sparse matrix out of junction ratios 
+indices = np.nonzero(~np.isnan(junc_ratios))
+sps = scipy.sparse.coo_matrix((junc_ratios[indices], indices), shape=junc_ratios.shape)
+csr_sparse = sps.tocsr()
+
+adata = ad.AnnData(csr_sparse, dtype=np.float32)
+adata.obs["cell_state"] = pd.Categorical(indicator_vector)  # Categoricals are preferred for efficiency
+adata.obs["total_counts"] = jc_counts.tot_counts  # Categoricals are preferred for efficiency
+sc.settings.verbosity = 0             # verbosity: errors (0), warnings (1), info (2), hints (3)
+sc.logging.print_header()
+sc.settings.set_figure_params(dpi=80, facecolor='white')
+sc.pp.highly_variable_genes(adata, min_mean=0.005, max_mean=5, min_disp=0.05) #Expects logarithmized data
+adata.raw = adata
+
+#Regress out effects of total counts per cell 
+sc.pp.regress_out(adata, ['total_counts'])
+
+sc.tl.pca(adata, svd_solver='arpack')
+
+print(sc.pl.pca_variance_ratio(adata, log=True))
+print(sc.pl.pca(adata, color="cell_state"))
+
 
 # %% 
 # import functions from 03_betabinomo_LDA_singlecells
@@ -143,7 +220,7 @@ if __name__ == "__main__":
 
     # Load data and define global variables 
 
-    batch_size = 2048 #should also be an argument that gets fed in
+    batch_size = 512 #should also be an argument that gets fed in
     
     #prep dataloader for training
     cell_junc_counts = data.DataLoader(Simulate_DataLoader(jc_counts.counts, jc_counts.num_trials))
@@ -153,7 +230,7 @@ if __name__ == "__main__":
     J = cell_junc_counts.dataset[0][0].shape[0] # number of junctions
     K = num_states
     num_trials = 1 
-    num_iters = 200
+    num_iters = 300
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -174,13 +251,10 @@ if __name__ == "__main__":
         og_theta_plot = pd.DataFrame(jc_counts.theta.numpy())
         print(sns.clustermap(og_theta_plot))
 
-        print("compare proportions of cell states estimated versus true")
-        sns.scatterplot(x=theta_f_plot[0], y=og_theta_plot[0])
-        plt.xlabel('Estimated')
-        plt.ylabel('Simulated')
+# %%
 
-        sns.scatterplot(x=theta_f_plot[1], y=og_theta_plot[1])
-        plt.xlabel('Estimated')
-        plt.ylabel('Simulated')
+print("compare proportions of cell states estimated versus true")
+print(sns.scatterplot(x=theta_f_plot[0], y=og_theta_plot[0]))
+print(sns.scatterplot(x=theta_f_plot[1], y=og_theta_plot[1]))
 
 # %%
