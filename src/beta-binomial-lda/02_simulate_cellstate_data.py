@@ -146,6 +146,10 @@ class JunctionClusterCounts():
         # Sample junction probabilities for all junctions and cell states
         junction_probs = torch.distributions.beta.Beta(alpha, beta).sample()
 
+        # **** To-Do! ****
+        # We want to ensure that every cell (row) has at least one junction with a non-zero count  (to-do)
+        # We also want to ensure that every junction (column) has at least one cell with a non-zero count (to-do)
+
         # Sample counts for all junctions and cell states
         counts = torch.distributions.binomial.Binomial(
             total_count=self.num_trials, probs=junction_probs).sample()
@@ -153,6 +157,7 @@ class JunctionClusterCounts():
         # Store the results in the self.Z and self.counts tensors
         # This ends up being basically a simple mixed model rather than mixed membership 
         # So every junction in the same cell will have the same Z value
+        # Need to fix this is simulating more complex data structures 
         self.Z = state_idx
         self.counts = counts
 
@@ -164,9 +169,9 @@ class JunctionClusterCounts():
 # Define parameters for simulation of cell states via beta distributions
 #________________________________________________________________________________________________________________
 
-num_states = 2
-num_junctions = 3000
-num_cells = 5000
+num_states = 3
+num_junctions = 5000
+num_cells = 500
 
 # create an instance of the JunctionClusterCounts class
 jc_counts = JunctionClusterCounts(num_cells, num_junctions, num_states)
@@ -254,7 +259,9 @@ if __name__ == "__main__":
 # %%
 
 print("compare proportions of cell states estimated versus true")
-print(sns.scatterplot(x=theta_f_plot[0], y=og_theta_plot[0]))
-print(sns.scatterplot(x=theta_f_plot[1], y=og_theta_plot[1]))
+print(sns.jointplot(x = og_theta_plot[0],y = theta_f_plot[0]))
+print(sns.jointplot(x = og_theta_plot[1],y = theta_f_plot[1]))
 
+# plot ELBOs 
+plt.plot(elbos_all)
 # %%
