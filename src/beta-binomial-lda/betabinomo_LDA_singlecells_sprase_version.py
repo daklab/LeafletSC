@@ -46,7 +46,7 @@ def load_cluster_data(input_file):
     summarized_data = pd.read_pickle(input_file)
 
     #for now just look at B and T cells
-    summarized_data = summarized_data[summarized_data["cell_type"].isin(["B", "CD8T", "MemoryCD4T", "NaiveCD4T"])]
+    summarized_data = summarized_data[summarized_data["cell_type"].isin(["NaiveCD4T"])]
     print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
@@ -64,27 +64,40 @@ def load_cluster_data(input_file):
 
     coo = summarized_data[["cell_id_index", "junction_id_index", "junc_count", "Cluster_Counts", "Cluster", "junc_ratio"]]
 
-    # just some sanity checks 
+    # just some sanity checks to make sure indices are in order 
     cell_ids_conversion = summarized_data[["cell_id_index", "cell_id", "cell_type"]].drop_duplicates()
     cell_ids_conversion = cell_ids_conversion.sort_values("cell_id_index")
 
     junction_ids_conversion = summarized_data[["junction_id_index", "junction_id", "Cluster"]].drop_duplicates()
     junction_ids_conversion = junction_ids_conversion.sort_values("junction_id_index")
-
-    #make coo_matrix for junction counts and cluster counts 
+ 
+    # make coo_matrix for junction counts
     coo_counts_sparse = coo_matrix((coo.junc_count, (coo.cell_id_index, coo.junction_id_index)), shape=(len(coo.cell_id_index.unique()), len(coo.junction_id_index.unique())))
-    #coo_cluster_sparse = coo_matrix((coo.Cluster_Counts, (coo.cell_id_index, coo.junction_id_index)), shape=(len(coo.cell_id_index.unique()), len(coo.junction_id_index.unique())))
-
-    #convert to csr_matrix format 
     coo_counts_sparse = coo_counts_sparse.tocsr()
-    coo_cluster_sparse = coo_cluster_sparse.tocsr()
+    juncs_nonzero = pd.DataFrame(np.transpose(coo_counts_sparse.nonzero()))
+    juncs_nonzero.columns = ["cell_id_index", "junction_id_index"]
+    juncs_nonzero["junc_count"] = coo_counts_sparse.data
 
-    cells_only = coo[["cell_id_index", "Cluster", "Cluster_Counts"]]
-    cells_only = cells_only.drop_duplicates()
+    # do the same for cluster counts 
+    cells_only = coo[["cell_id_index", "Cluster", "Cluster_Counts"]].drop_duplicates()
     merged_df = pd.merge(cells_only, junction_ids_conversion)
     coo_cluster_sparse = coo_matrix((merged_df.Cluster_Counts, (merged_df.cell_id_index, merged_df.junction_id_index)), shape=(len(merged_df.cell_id_index.unique()), len(merged_df.junction_id_index.unique())))
+    coo_cluster_sparse = coo_cluster_sparse.tocsr()
+    cluster_nonzero = pd.DataFrame(np.transpose(coo_cluster_sparse.nonzero()))
+    cluster_nonzero.columns = ["cell_id_index", "junction_id_index"]
+    cluster_nonzero["cluster_count"] = coo_cluster_sparse.data
 
-    return(coo, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion)
+    final_data = pd.merge(juncs_nonzero, cluster_nonzero, how='outer').fillna(0)
+    final_data["clustminjunc"] = final_data["cluster_count"] - final_data["junc_count"]
+
+    # notes to self about sparse csr matrices 
+    #The crow_indices tensor contains the row indices of non-zero elements in the tensor. In this case, the non-zero elements have row indices ranging from 0 to 16723683.
+    #The col_indices tensor contains the column indices of the non-zero elements in the tensor.
+    #The values tensor contains the values of the non-zero elements in the tensor. In this case, all the non-zero elements have the value 1.
+    #The size of the tensor is (40939, 38105), meaning that the tensor has 40939 rows and 38105 columns.
+    #The nnz property tells us that there are 16723683 non-zero elements in the tensor.
+    
+    return(final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion)
 
 # %% 
 
@@ -125,8 +138,10 @@ def init_var_params(J, K, N, eps = 1e-2):
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
     #PHI = torch.rand((N, J, K)).double() + eps
-    PHI = torch.ones((N, J, K)).double() + eps
-    PHI = PHI / PHI.sum(dim=-1, keepdim=True) # normalize to sum to 1
+    #PHI = torch.ones((N, J, K)).double() + eps
+    PHI = torch.full((N, J, K), 1 + eps, dtype=torch.double)
+    #PHI = PHI / PHI.sum(dim=-1, keepdim=True) # normalize to sum to 1
+    PHI = torch.softmax(PHI, dim=-1)
     
     return ALPHA, PI, GAMMA, PHI
 
@@ -334,43 +349,31 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, cell_junc_counts, theta_prior=0.1):
 
     return(PHI_t, GAMMA_t)    
 
-def update_beta(J, K, PHI, GAMMA, cell_junc_counts, alpha_prior=0.65, beta_prior=0.65):
+def update_beta(J, K, PHI, GAMMA, final_data, alpha_prior=0.65, beta_prior=0.65):
     
     '''
     Update variational parameters for beta distribution
     '''
     
-    # Iterate through each cell 
-    PHI_t = copy.deepcopy(PHI)
-    GAMMA_t = copy.deepcopy(GAMMA)
-    ALPHA_t = torch.ones((J, K)) * alpha_prior
-    PI_t = torch.ones((J, K)) * beta_prior
-    batch_sizes = []
+    # Re-initialize ALPHA and PI values
+    ALPHA_t = torch.ones((J, K), dtype=torch.float64) * alpha_prior
+    PI_t = torch.ones((J, K), dtype=torch.float64) * beta_prior
 
-    # how to do this without dense arrays with zeroes 
-    # only calculate for nonzero cluster junctions in each cell 
-    # right now my dataframe only has nonzero JUNCTIONS 
-    # but i want to include zero count junctions if their cluster has a nonzero count
+    # Set up indicies for extracting correct values from PHI
+    first_indices = final_data.cell_id_index.values
+    second_indices = final_data.junction_id_index.values
 
-
-    for c, (juncs, clusters) in enumerate(cell_junc_counts):
-        batch_size = juncs.size(0)
-        batch_sizes.append(batch_size)
-        
-        start_idx = c * batch_size
-        end_idx = start_idx + batch_size
-
-        if(c>0):
-            start_idx = c * batch_sizes[c-1]
-            end_idx = start_idx + batch_size   
-        
-        phi_values = PHI_t[start_idx:end_idx]
-        # since most junction counts are zeroes should be ending up with a lot of zeros in the sum every time
-        ALPHA_t += torch.sum((juncs.unsqueeze(-1) * phi_values), dim=0) #removed prior since it's added during inintialization   
-        PI_t +=  torch.sum(((clusters-juncs).unsqueeze(-1) * phi_values), dim=0) #removed prior since it's added during inintialization   
+    # Calculate alphas and pis for each cell-junction pair 
+    alphas = (torch.tensor(final_data.junc_count.values).unsqueeze(-1) * PHI[first_indices, second_indices, :])
+    pis = (torch.tensor(final_data.clustminjunc.values).unsqueeze(-1) * PHI[first_indices, second_indices, :])
     
-    #print("Get ELBO post ALPHA and PI update for ALL cells")
-    #get_elbo(ALPHA_t, PI_t, GAMMA_t, PHI_t)
+    # Create a tensor of the unique junction indices
+    index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64)
+
+    # Use scatter_add to sum the values for each unique index
+    ALPHA_t = torch.scatter_add(ALPHA_t, 0, index_tensor[:, None].repeat(1, alphas.shape[1]), alphas)
+    PI_t = torch.scatter_add(PI_t, 0, index_tensor[:, None].repeat(1, pis.shape[1]), pis)
+    
     return(ALPHA_t, PI_t)
 
 # %%   
@@ -429,8 +432,10 @@ if __name__ == "__main__":
     # get input data (this is standard output from leafcutter-sc pipeline so the column names will always be the same)
     
     input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/junctions_full_for_LDA.pkl.pkl' #this should be an argument that gets fed in
-    nonzero, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
+    coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
 
+    juncs = coo_counts_sparse
+    clusts = coo_cluster_sparse
     batch_size = 512 #should also be an argument that gets fed in
     
     #prep dataloader for training
@@ -441,8 +446,10 @@ if __name__ == "__main__":
     cell_junc_counts = data.DataLoader(CSRDataLoader(coo_counts_sparse[rand_ind], coo_cluster_sparse[rand_ind, ]), batch_size=batch_size, shuffle=False)
 
     # global variables
-    N = len(cell_junc_counts.dataset) # number of cells
-    J = cell_junc_counts.dataset[0][0].shape[0] # number of junctions
+    #N = len(cell_junc_counts.dataset) # number of cells
+    N =coo_cluster_sparse.size()[0]
+    J = coo_cluster_sparse.size()[1]
+    #J = cell_junc_counts.dataset[0][0].shape[0] # number of junctions
     K = 2 # should also be an argument that gets fed in
     num_trials = 1 # should also be an argument that gets fed in
     num_iters = 5 # should also be an argument that gets fed in
