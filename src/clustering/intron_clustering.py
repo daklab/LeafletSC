@@ -243,6 +243,5 @@ if __name__ == '__main__':
     output_file=args.output
     main(path, gtf_file, setting, output_file)
 
-
 # to test run 
 #python intron_clustering.py --gtf_file /gpfs/commons/groups/knowles_lab/Karin/genome_files/Homo_sapiens.GRCh38.108.chr.gtf --junc_files /gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions --output_file /gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/clustered_junctions.txt --setting canonical

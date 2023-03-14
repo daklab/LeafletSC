@@ -1,7 +1,7 @@
 import pandas as pd
 import argparse
 from ast import literal_eval
-import pdb 
+import numpy as np
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -50,11 +50,9 @@ def main(intron_clusters, output_file):
 
     cells_types = clusts[["cell", "file_name", "cell_id"]].drop_duplicates()
     print(cells_types.groupby(["file_name"])["file_name"].count())
-    unique_cells = cells_types.file_name.unique()
  
     summarized_data = summarized_data.drop_duplicates(subset=['cell_id', 'junction_id'], keep='last') #double check if this is still necessary
     summarized_data = clust_cell_counts.merge(summarized_data)
-    juncs = summarized_data[["junction_id"]].drop_duplicates()
 
     #save file and use as input for LDA script 
     summarized_data["junc_ratio"] = summarized_data["junc_count"] / summarized_data["Cluster_Counts"]
@@ -64,8 +62,8 @@ def main(intron_clusters, output_file):
     #Create a cell type column (file_name) will be used as that 
     summarized_data["cell_type"] = summarized_data["file_name"]
 
-    #save as Pickle file 
-    summarized_data.to_pickle(output_file + ".pkl")
+    #save as hdf file 
+    summarized_data.to_hdf(output_file + ".h5", key='df', mode='w')
 
 if __name__ == '__main__':
     intron_clusters=args.intron_clusters

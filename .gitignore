@@ -1,3 +1,6 @@
 src/beta-binomial-lda/*.pkl.pkl
 *.pkl
 **/*.pkl
+*.h5
+*.h5.*
+**/*.h5

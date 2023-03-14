@@ -74,26 +74,6 @@ rpy2.robjects.numpy2ri.activate()
 #n_ij = cluster counts 
 #junction j in cell i, junction count is y_ij
 
-def clean_up_intron_clusters(intron_clusters_input):
-    
-    '''
-    process the intron clusters file to be ready for downstream analysis
-    mainly seperate the CB and counts column so that each cell is represented individually
-    '''
-
-    clust_file=intron_clusters_input
-    #read in the cluster file
-    clusts=pd.read_csv(clust_file, sep="}", header=0, low_memory=False)
-    clusts=clusts.drop_duplicates() #double check why duplicates here in the first place 
-    clusts.split_up = clusts.split_up.apply(literal_eval) 
-    clusts=clusts.explode('split_up')
-    clusts[['cell', 'count']] = clusts['split_up'].str.split(':', 1, expand=True)
-    clusts=clusts.drop(['split_up'], axis=1)
-    clusts['strand'] = "*"
-    clusts["cell_id"] = clusts.file_name + "_" + clusts.cell
-    print("The number of intron clusters evaluated is " + str(len(clusts.Cluster.unique()))) #8,085
-    return(clusts)
-
 def get_missing_junctions(clust, cell, clusts):
 
     '''
@@ -210,8 +190,9 @@ def main():
     
     #get alpha beta parameters for each junctions (within each cell type seperatley)
     pool=Pool(processes=4)
+    #clust_file = '/gpfs/commons/home/kisaev/leafcutter-sc/test.h5' #this should be an argument that gets fed in
     clust_file = args.introns   
-    clusts=clean_up_intron_clusters(clust_file)
+    clusts = pd.read_hdf(clust_file, 'df')
 
     all_cells = clusts.cell_id.unique() #cells across different cell types can have the same cell barcode, came from different sublibraries 
     all_cells=pd.Series(all_cells) 

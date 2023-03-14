@@ -14,21 +14,34 @@ import copy
 from scipy.sparse import coo_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
-from time import sleep
 import os 
+import argparse
+
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:50" #By default, this value is set to 256 MB. 
 
 torch.manual_seed(42)
+
+# %%    
+#parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
+
+#parser.add_argument('--input_file', dest='input_file', 
+              #      help='name of the file that has the intron cluster events and junction information from running 01_prepare_input_coo.py')
+#args = parser.parse_args()
+
 # %%
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#                      Utilities
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 # load data 
 
 def load_cluster_data(input_file):
 
-   # read in this pickl file output_test.pkl
-    summarized_data = pd.read_pickle(input_file)
+   # read in hdf file 
+    summarized_data = pd.read_hdf(input_file, 'df')
 
     #for now just look at B and T cells
-    summarized_data = summarized_data[summarized_data["cell_type"].isin(["NaiveCD4T", "B"])]
+    #summarized_data = summarized_data[summarized_data["cell_type"].isin(["NaiveCD4T", "B"])]
     print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
@@ -356,7 +369,9 @@ if __name__ == "__main__":
     # Load data and define global variables 
     # get input data (this is standard output from leafcutter-sc pipeline so the column names will always be the same)
     
-    input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/junctions_full_for_LDA.pkl.pkl' #this should be an argument that gets fed in
+    input_file = '/gpfs/commons/home/kisaev/leafcutter-sc/test.h5' #this should be an argument that gets fed in
+    
+    #input_file=args.input_file
     final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
     
     # global variables
@@ -366,7 +381,7 @@ if __name__ == "__main__":
     K = 2 # should also be an argument that gets fed in
     
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 200 # should also be an argument that gets fed in
+    num_iters = 250 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -392,5 +407,9 @@ if __name__ == "__main__":
         # plot ELBOs 
         plt.plot(elbos_all[1:])
         print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", hue="cell_type", kind="kde"))
+
+        # save the learned variational parameters
+        np.savez('variational_params.npz', ALPHA_f=ALPHA_f, PI_f=PI_f, GAMMA_f=GAMMA_f, PHI_f=PHI_f, juncs_probs=juncs_probs, theta_f=theta_f, z_f=z_f)
+
 # %%
-print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", height=5, ratio=2, marginal_ticks=True))
+#print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", height=5, ratio=2, marginal_ticks=True))
