@@ -19,7 +19,6 @@ import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:50" #By default, this value is set to 256 MB. 
 
 torch.manual_seed(42)
-
 # %%
 # load data 
 
@@ -29,7 +28,7 @@ def load_cluster_data(input_file):
     summarized_data = pd.read_pickle(input_file)
 
     #for now just look at B and T cells
-    summarized_data = summarized_data[summarized_data["cell_type"].isin(["NaiveCD4T"])]
+    summarized_data = summarized_data[summarized_data["cell_type"].isin(["NaiveCD4T", "B"])]
     print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
@@ -72,7 +71,8 @@ def load_cluster_data(input_file):
 
     final_data = pd.merge(juncs_nonzero, cluster_nonzero, how='outer').fillna(0)
     final_data["clustminjunc"] = final_data["cluster_count"] - final_data["junc_count"]
-
+    final_data["juncratio"] = final_data["junc_count"] / final_data["cluster_count"] 
+    final_data = final_data.merge(cell_ids_conversion, on="cell_id_index", how="left")
     return(final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion)
 
 # %% 
@@ -366,7 +366,7 @@ if __name__ == "__main__":
     K = 2 # should also be an argument that gets fed in
     
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 50 # should also be an argument that gets fed in
+    num_iters = 200 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -389,4 +389,8 @@ if __name__ == "__main__":
         row_colors = celltypes.map(lut)
         print(sns.clustermap(theta_f_plot, row_colors=row_colors))
         plt.show()
+        # plot ELBOs 
+        plt.plot(elbos_all[1:])
+        print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", hue="cell_type", kind="kde"))
 # %%
+print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", height=5, ratio=2, marginal_ticks=True))
