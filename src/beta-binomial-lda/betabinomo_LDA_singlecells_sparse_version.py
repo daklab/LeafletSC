@@ -10,14 +10,14 @@ print(device)
 import pandas as pd
 import numpy as np
 import copy
+torch.cuda.empty_cache()
 
+from dataclasses import dataclass
 from scipy.sparse import coo_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os 
 import argparse
-
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:50" #By default, this value is set to 256 MB. 
 
 torch.manual_seed(42)
 
@@ -90,6 +90,9 @@ def load_cluster_data(input_file):
 
 # %% 
 
+# Make dataclass for storing junction and cluster information and counts 
+
+
 # Functions for probabilistic beta-binomial AS model 
 
 def init_var_params(J, K, N, eps = 1e-2):
@@ -106,7 +109,7 @@ def init_var_params(J, K, N, eps = 1e-2):
     ALPHA = torch.from_numpy(np.random.uniform(1, 1, size=(J, K))).to(device)
     PI = torch.from_numpy(np.random.uniform(1, 1, size=(J, K))).to(device)
 
-    print(ALPHA / (ALPHA+PI))
+    #print(ALPHA / (ALPHA+PI))
 
     # Topic Proportions (cell states proportions), GAMMA ~ Dirichlet(eta) 
     GAMMA = torch.ones((N, K)).double().to(device)
@@ -122,11 +125,12 @@ def init_var_params(J, K, N, eps = 1e-2):
 
     # set the random indices to 1000
     GAMMA = GAMMA * (1 - mask) + 1000 * mask
-    print(GAMMA)
+    #print(GAMMA)
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
-    PHI = torch.full((N, J, K), 1 + eps, dtype=torch.double).to(device)
-    PHI = torch.softmax(PHI, dim=-1)
+    # Initialized to 1/K for each junction
+    PHI = torch.ones((N, J, K)).double().to(device) * 1/K
+    #PHI = torch.full((N, J, K), 1/K, dtype=torch.double).to(device)
     
     return ALPHA, PI, GAMMA, PHI
 
@@ -169,30 +173,38 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI, final_data):
     '''
 
     # make copies of the variational parameters - do I need to do this here? 
-    ALPHA_t = copy.deepcopy(ALPHA)
-    PI_t = copy.deepcopy(PI)
-    PHI_t = copy.deepcopy(PHI)
-    GAMMA_t = copy.deepcopy(GAMMA)
+    #ALPHA_t = copy.deepcopy(ALPHA)
+    #PI_t = copy.deepcopy(PI)
+    #PHI_t = copy.deepcopy(PHI)
+    #GAMMA_t = copy.deepcopy(GAMMA)
+
+    ALPHA_t = ALPHA
+    PI_t = PI
+    PHI_t = PHI
+    GAMMA_t = GAMMA
+    
+    # Set up indicies for extracting correct values from ALPHA, PI and PHI
+    junc_index_tensor = final_data.junc_index
+    cell_index_tensor = final_data.cell_index
+
+    ycount=final_data.y_count.to(device)
+    tcount=final_data.t_count.to(device)
 
     ### E[log p(Z_ij|THETA_i)]    
     all_digammas = (torch.digamma(GAMMA_t) - torch.digamma(torch.sum(GAMMA_t, dim=1)).unsqueeze(1)) # shape: (N, K)
-    E_log_p_xz_part1 = sum(torch.sum(PHI_t[c] @ all_digammas[c]) for c in range(PHI_t.shape[0])) #
+        
+    # Get the phi values for non-zero cluster count cell-junction pairs 
+    phi_batch = PHI_t[cell_index_tensor, junc_index_tensor, :]
+    
+    # Element-wise multiplication and sum over junctions-Ks and across cells 
+    PHI_t_times_all_digammas = torch.sum(phi_batch * all_digammas[cell_index_tensor])
+    E_log_p_xz_part1 = PHI_t_times_all_digammas
 
     ### E[log p(Y_ij | BETA, Z_ij)] 
-    
-    # Set up indicies for extracting correct values from ALPHA, PI and PHI
-    junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
-    cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64).to(device)
-
-    ycount=torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device)
-    tcount=torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
-
     junc_counts_states = ycount.squeeze()[:, None] * (torch.digamma(ALPHA_t[junc_index_tensor, :]) - torch.digamma(ALPHA_t[junc_index_tensor, :]+PI_t[junc_index_tensor, :]))
     clust_counts_states = tcount.squeeze()[:, None] * (torch.digamma(PI_t[junc_index_tensor, :]) - torch.digamma(ALPHA_t[junc_index_tensor, :]+PI_t[junc_index_tensor, :]))
     part2 = junc_counts_states + clust_counts_states
 
-    # Get the phi values for the current batch
-    phi_batch = PHI_t[cell_index_tensor, junc_index_tensor, :]
     E_log_p_xz_part2 = torch.sum(phi_batch * part2) #check that summation dimension is correct****
     
     E_log_p_xz = E_log_p_xz_part1 + E_log_p_xz_part2
@@ -202,7 +214,7 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI, final_data):
 
 ## Define all the entropies
 
-def get_entropy(ALPHA, PI, GAMMA, PHI):
+def get_entropy(ALPHA, PI, GAMMA, PHI, final_data):
     
     '''
     H(X) = E(-logP(X)) for random variable X whose pdf is P
@@ -217,7 +229,11 @@ def get_entropy(ALPHA, PI, GAMMA, PHI):
     E_log_q_theta = dirichlet_dist.entropy().sum()
     
     #3. Sum over all cells and junctions, entropy of  categorical PDF given its variational parameter (PHI_ij)
-    E_log_q_z = torch.sum(-(PHI * torch.log(PHI)).sum(dim=-1))
+    junc_index_tensor = final_data.junc_index
+    cell_index_tensor = final_data.cell_index
+
+    phi_batch = PHI[cell_index_tensor, junc_index_tensor, :]
+    E_log_q_z = torch.sum(-(phi_batch * torch.log(phi_batch)))
     
     entropy_term = E_log_q_beta + E_log_q_theta + E_log_q_z
     return entropy_term
@@ -229,10 +245,10 @@ def get_elbo(ALPHA, PI, GAMMA, PHI, final_data):
     #1. Calculate expected log joint
     E_log_pbeta_val = E_log_pbeta(ALPHA, PI)
     E_log_ptheta_val = E_log_ptheta(GAMMA)
-    E_log_pzx_val = E_log_xz(ALPHA, PI, GAMMA, PHI, final_data) #**this step takes a long time
+    E_log_pzx_val = E_log_xz(ALPHA, PI, GAMMA, PHI, final_data)
 
     #2. Calculate entropy
-    entropy = get_entropy(ALPHA, PI, GAMMA, PHI)
+    entropy = get_entropy(ALPHA, PI, GAMMA, PHI, final_data)
 
     #3. Calculate ELBO
     elbo = E_log_pbeta_val + E_log_ptheta_val + E_log_pzx_val + entropy
@@ -249,20 +265,25 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.1):
     Update variational parameters for z and theta distributions
     '''                
     
-    GAMMA_t = copy.deepcopy(GAMMA)
-    ALPHA_t = copy.deepcopy(ALPHA)
-    PI_t = copy.deepcopy(PI)
-    PHI_t = copy.deepcopy(PHI)
+    #GAMMA_t = copy.deepcopy(GAMMA)
+    #ALPHA_t = copy.deepcopy(ALPHA)
+    #PI_t = copy.deepcopy(PI)
+    #PHI_t = copy.deepcopy(PHI)
+
+    GAMMA_t = GAMMA
+    ALPHA_t = ALPHA
+    PI_t = PI
+    PHI_t = PHI
 
     # part1 should be good to go 
     part1 = torch.digamma(GAMMA_t) - torch.digamma(torch.sum(GAMMA_t)).unsqueeze(0) # shape: N x K      
 
     # Set up indicies for extracting correct values from PHI
-    junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
-    cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64).to(device)
+    junc_index_tensor = final_data.junc_index
+    cell_index_tensor = final_data.cell_index
 
-    ycount=torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device)
-    tcount=torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
+    ycount=final_data.y_count.to(device)
+    tcount=final_data.t_count.to(device)
 
     junc_counts_states = ycount.squeeze()[:, None] * (torch.digamma(ALPHA_t[junc_index_tensor, :]) - torch.digamma(ALPHA_t[junc_index_tensor, :]+PI_t[junc_index_tensor, :]))
     clust_counts_states = tcount.squeeze()[:, None] * (torch.digamma(PI_t[junc_index_tensor, :]) - torch.digamma(ALPHA_t[junc_index_tensor, :]+PI_t[junc_index_tensor, :]))
@@ -301,15 +322,15 @@ def update_beta(J, K, PHI, final_data, alpha_prior=0.65, beta_prior=0.65):
     PI_t = torch.ones((J, K), dtype=torch.float64).to(device) * beta_prior
 
     # Set up indicies for extracting correct values from PHI
-    first_indices = final_data.cell_id_index.values
-    second_indices = final_data.junction_id_index.values
+    first_indices = final_data.cell_index
+    second_indices = final_data.junc_index
 
     # Calculate alphas and pis for each cell-junction pair 
-    alphas = (torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device) * PHI[first_indices, second_indices, :])
-    pis = (torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device) * PHI[first_indices, second_indices, :])
+    alphas = final_data.y_count.to(device) * PHI[first_indices, second_indices, :]
+    pis = final_data.t_count.to(device) * PHI[first_indices, second_indices, :] #t_count is cluster counts minus junction counts
     
     # Create a tensor of the unique junction indices
-    index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
+    index_tensor = final_data.junc_index.to(device)
 
     # Use scatter_add to sum the values for each unique index
     ALPHA_t = torch.scatter_add(ALPHA_t, 0, index_tensor[:, None].repeat(1, alphas.shape[1]), alphas)
@@ -332,22 +353,26 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, final_data):
 
 # %%
 
-def calculate_CAVI(J, K, N, final_data, num_iterations=5):
+def calculate_CAVI(J, K, N, my_data, num_iterations=5):
     
     '''
     Calculate CAVI
     '''
 
     ALPHA_init, PI_init, GAMMA_init, PHI_init = init_var_params(J, K, N)
-    elbos_init = get_elbo(ALPHA_init, PI_init, GAMMA_init, PHI_init, final_data)
+    torch.cuda.empty_cache()
+
+    elbos_init = get_elbo(ALPHA_init, PI_init, GAMMA_init, PHI_init, my_data)
+    torch.cuda.empty_cache()
+
     elbos = []
     elbos.append(elbos_init)
     print("Got the initial ELBO ^")
     
-    ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_init, PI_init, GAMMA_init, PHI_init, J, K, final_data)
+    ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_init, PI_init, GAMMA_init, PHI_init, J, K, my_data)
     print("Got the first round of updates!")
     
-    elbo_firstup = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, final_data)
+    elbo_firstup = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, my_data)
     elbos.append(elbo_firstup)
     
     print("got the first ELBO after updates ^")
@@ -355,13 +380,21 @@ def calculate_CAVI(J, K, N, final_data, num_iterations=5):
 
     while(elbos[-1] > elbos[-2]) and (iter < num_iterations):
         print("ELBO not converged, re-running CAVI iteration # " + str(iter+1))
-        ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, J, K, final_data)
-        elbo = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, final_data)
+        ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, J, K, my_data)
+        elbo = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, my_data)
         elbos.append(elbo)
         iter = iter + 1
     
     print("ELBO converged, CAVI iteration # " + str(iter+1) + " complete")
     return(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, elbos)
+
+# %%
+@dataclass
+class IndexCountTensor():
+    junc_index: torch.Tensor
+    cell_index: torch.Tensor
+    y_count: torch.Tensor
+    t_count: torch.Tensor
 
 # %%
 if __name__ == "__main__":
@@ -380,8 +413,15 @@ if __name__ == "__main__":
     J = coo_cluster_sparse.shape[1]
     K = 2 # should also be an argument that gets fed in
     
+    # initiate instance of data class containing junction and cluster indices for non-zero clusters 
+    junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
+    cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64).to(device)
+    ycount = torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device)
+    tcount = torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
+    my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount)
+
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 250 # should also be an argument that gets fed in
+    num_iters = 20 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -389,7 +429,7 @@ if __name__ == "__main__":
         # run coordinate ascent VI
         print(K)
 
-        ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = calculate_CAVI(J, K, N, final_data, num_iters)
+        ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = calculate_CAVI(J, K, N, my_data, num_iters)
         juncs_probs = ALPHA_f / (ALPHA_f+PI_f)
         theta_f = distributions.Dirichlet(GAMMA_f).sample().numpy()
         z_f = distributions.Categorical(PHI_f).sample()
@@ -402,11 +442,13 @@ if __name__ == "__main__":
         lut = dict(zip(celltypes.unique(), ["r", "b", "g", "orange", "purple", "brown", "pink", "gray", "olive", "cyan"]))
         print(lut)
         row_colors = celltypes.map(lut)
-        print(sns.clustermap(theta_f_plot, row_colors=row_colors))
-        plt.show()
+        # save heatmap as image png 
+        heatmap=(sns.clustermap(theta_f_plot, row_colors=row_colors))
+        heatmap.savefig("heatmap.png")
+        #plt.show()
         # plot ELBOs 
-        plt.plot(elbos_all[1:])
-        print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", hue="cell_type", kind="kde"))
+        #plt.plot(elbos_all[1:])
+        #print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", hue="cell_type", kind="kde"))
 
         # save the learned variational parameters
         np.savez('variational_params.npz', ALPHA_f=ALPHA_f, PI_f=PI_f, GAMMA_f=GAMMA_f, PHI_f=PHI_f, juncs_probs=juncs_probs, theta_f=theta_f, z_f=z_f)

@@ -4,3 +4,9 @@ src/beta-binomial-lda/*.pkl.pkl
 *.h5
 *.h5.*
 **/*.h5
+*.png
+*.csv 
+*.bed 
+src/beta-binomial-lda/*.png 
+src/beta-binomial-lda/*.out 
+src/beta-binomial-lda/*.npz 

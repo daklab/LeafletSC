@@ -292,8 +292,6 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
     #save this file and return (main output from script)
     df.to_csv(output, index=False, sep="}")  #find alterantive more efficient way to save this file, pickl file?
 
-    print(datetime.now() - startTime)
-
 if __name__ == '__main__':
     gtf_file=args.gtf_file
     path=args.junc_files
@@ -310,6 +308,7 @@ if __name__ == '__main__':
 
 # to test run 
 #gtf_file="/gpfs/commons/groups/knowles_lab/Karin/genome_files/Homo_sapiens.GRCh38.108.chr.gtf"
+#gtf_file=/gpfs/commons/groups/knowles_lab/Karin/genome_files/Homo_sapiens.GRCh38.108.chr.gtf
 #junc_files="/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions"
 #output_file="/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/clustered_junctions.txt" 
 #setting="canonical"
