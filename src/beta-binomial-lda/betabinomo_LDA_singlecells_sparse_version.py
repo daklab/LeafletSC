@@ -41,7 +41,7 @@ def load_cluster_data(input_file):
     summarized_data = pd.read_hdf(input_file, 'df')
 
     #for now just look at B and T cells
-    #summarized_data = summarized_data[summarized_data["cell_type"].isin(["NaiveCD4T", "B"])]
+    summarized_data = summarized_data[summarized_data["cell_type"].isin(["B"])]
     print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
@@ -78,10 +78,7 @@ def load_cluster_data(input_file):
     return(final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion)
 
 # %% 
-
-# Make dataclass for storing junction and cluster information and counts 
-
-
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Functions for probabilistic beta-binomial AS model 
 
 def init_var_params(J, K, N, final_data, eps = 1e-2):
@@ -98,8 +95,6 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
     ALPHA = torch.from_numpy(np.random.uniform(1, 1, size=(J, K))).to(device)
     PI = torch.from_numpy(np.random.uniform(1, 1, size=(J, K))).to(device)
 
-    #print(ALPHA / (ALPHA+PI))
-
     # Topic Proportions (cell states proportions), GAMMA ~ Dirichlet(eta) 
     GAMMA = torch.ones((N, K)).double().to(device)
     
@@ -114,7 +109,6 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
 
     # set the random indices to 1000
     GAMMA = GAMMA * (1 - mask) + 1000 * mask
-    #print(GAMMA)
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
     # Initialized to 1/K for each junction
@@ -241,21 +235,15 @@ def get_elbo(ALPHA, PI, GAMMA, PHI, final_data):
 
 # %%
 
-def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.1):
+def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.01):
 
     '''
     Update variational parameters for z and theta distributions
     '''                
-    
-    #GAMMA_t = copy.deepcopy(GAMMA)
-    #ALPHA_t = copy.deepcopy(ALPHA)
-    #PI_t = copy.deepcopy(PI)
-    #PHI_t = copy.deepcopy(PHI)
 
     GAMMA_t = GAMMA
     ALPHA_t = ALPHA
     PI_t = PI
-    PHI_t = PHI
 
     # part1 should be good to go 
     part1 = torch.digamma(GAMMA_t) - torch.digamma(torch.sum(GAMMA_t)).unsqueeze(0) # shape: N x K      
@@ -280,7 +268,7 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.1):
     # Add the values from part1 to the appropriate indices
     counts = torch.bincount(cell_index_tensor)
     expanded_part1 = part1.repeat_interleave(counts, dim=0)
-    result_tensor = result_tensor + expanded_part1
+    result_tensor += expanded_part1
 
     # Update PHI_t
     PHI_t = result_tensor
@@ -295,8 +283,7 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.1):
     # Update GAMMA_c using the updated PHI_c
     # Make sure to only add junctions that belong to the same cell
     cell_sums = torch.zeros(N, K, dtype=torch.float64).to(device)
-    GAMMA_up = theta_prior + cell_sums.scatter_add_(0, cell_index_tensor.unsqueeze(1).repeat(1, 2), PHI_up)
-
+    GAMMA_up = theta_prior + cell_sums.index_add_(0, cell_index_tensor, PHI_up)
     return(PHI_up, GAMMA_up)    
 
 def update_beta(J, K, PHI, final_data, alpha_prior=0.65, beta_prior=0.65):
@@ -308,10 +295,6 @@ def update_beta(J, K, PHI, final_data, alpha_prior=0.65, beta_prior=0.65):
     # Re-initialize ALPHA and PI values
     ALPHA_t = torch.ones((J, K), dtype=torch.float64).to(device) * alpha_prior
     PI_t = torch.ones((J, K), dtype=torch.float64).to(device) * beta_prior
-
-    # Set up indicies for extracting correct values from PHI
-    first_indices = final_data.cell_index
-    second_indices = final_data.junc_index
 
     # Calculate alphas and pis for each cell-junction pair 
     alphas = final_data.y_count.to(device) * PHI
@@ -399,7 +382,7 @@ if __name__ == "__main__":
     
     N = coo_cluster_sparse.shape[0]
     J = coo_cluster_sparse.shape[1]
-    K = 2 # should also be an argument that gets fed in
+    K = 5 # should also be an argument that gets fed in
     
     # initiate instance of data class containing junction and cluster indices for non-zero clusters 
     junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
@@ -408,16 +391,8 @@ if __name__ == "__main__":
     tcount = torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
     my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount)
 
-    # print histogram of junction ratios with x-axis label color by cell type 
-    #plt.figure(figsize=(10, 5))
-    #plt.title("Histogram of Junction Ratios")
-    #sns.histplot(data=final_data, x="juncratio", hue="cell_type")
-    #plt.xlabel("Junction Ratio")
-    #plt.ylabel("Frequency")
-    #plt.show()
-
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 250 # should also be an argument that gets fed in
+    num_iters = 200 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -426,6 +401,7 @@ if __name__ == "__main__":
         print(K)
 
         ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = calculate_CAVI(J, K, N, my_data, num_iters)
+        elbos_all = torch.FloatTensor(elbos_all).numpy()
         juncs_probs = ALPHA_f / (ALPHA_f+PI_f)
         theta_f = distributions.Dirichlet(GAMMA_f).sample()
         z_f = distributions.Categorical(PHI_f).sample()
@@ -437,16 +413,12 @@ if __name__ == "__main__":
         lut = dict(zip(celltypes.unique(), ["r", "b", "g", "orange", "purple", "brown", "pink", "gray", "olive", "cyan"]))
         print(lut)
         row_colors = celltypes.map(lut)
-        # save heatmap as image png 
-        #heatmap=(sns.clustermap(theta_f_plot, row_colors=row_colors))
-        #heatmap.savefig("heatmap.png")
-        #plt.show()
+
         # plot ELBOs 
-        #plt.plot(elbos_all[1:])
-        #print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", hue="cell_type", kind="kde"))
+        plt.plot(elbos_all[1:])
 
         # save the learned variational parameters
-        np.savez('variational_params.npz', ALPHA_f=ALPHA_f, PI_f=PI_f, GAMMA_f=GAMMA_f, PHI_f=PHI_f, juncs_probs=juncs_probs, theta_f=theta_f, z_f=z_f)
+        #np.savez('variational_params.npz', ALPHA_f=ALPHA_f, PI_f=PI_f, GAMMA_f=GAMMA_f, PHI_f=PHI_f, juncs_probs=juncs_probs, theta_f=theta_f, z_f=z_f)
 
 # %%
 #print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", height=5, ratio=2, marginal_ticks=True))
