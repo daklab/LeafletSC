@@ -41,7 +41,7 @@ def load_cluster_data(input_file):
     summarized_data = pd.read_hdf(input_file, 'df')
 
     #for now just look at B and T cells
-    summarized_data = summarized_data[summarized_data["cell_type"].isin(["B"])]
+    #summarized_data = summarized_data[summarized_data["cell_type"].isin(["B"])]
     print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
