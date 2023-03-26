@@ -112,25 +112,6 @@ class JunctionClusterCounts():
 
         return alpha_params, beta_params
 
-    # rewrite simulate_counts without forloops [to-do] **
-
-    #def simulate_counts(self):
-    #    for cell_idx in tqdm(range(self.num_cells)):
-    #        for j_idx in (range(self.num_junctions)):
-    #            state_probs = self.theta[cell_idx]
-    #            state_probs /= state_probs.sum()
-    #            #sample a cell state label for each junction
-    #            state_idx = torch.multinomial(state_probs, 1).item()
-    #            self.Z[cell_idx, j_idx] = state_idx
-    #            #sample a probability(success) for junction in given cell state
-    #            junction_probs = torch.distributions.beta.Beta(
-    #                self.alpha_params[state_idx, j_idx], 
-    #                self.beta_params[state_idx, j_idx]).sample()
-    #            #sample junction counts given probability of success and total number of reads in cluster 
-    #            counts = torch.distributions.binomial.Binomial(
-    #                total_count=self.num_trials[cell_idx, j_idx], probs=junction_probs).sample()
-    #            self.counts[cell_idx, j_idx] = counts
-
     def simulate_counts(self):
 
         # Calculate state probabilities for all cells
@@ -169,9 +150,9 @@ class JunctionClusterCounts():
 # Define parameters for simulation of cell states via beta distributions
 #________________________________________________________________________________________________________________
 
-num_states = 3
+num_states = 2
 num_junctions = 5000
-num_cells = 750
+num_cells = 200
 
 # create an instance of the JunctionClusterCounts class
 jc_counts = JunctionClusterCounts(num_cells, num_junctions, num_states)
@@ -213,7 +194,6 @@ sc.tl.pca(adata, svd_solver='arpack')
 
 print(sc.pl.pca_variance_ratio(adata, log=True))
 print(sc.pl.pca(adata, color="cell_state"))
-
 
 # %% 
 # import functions from 03_betabinomo_LDA_singlecells

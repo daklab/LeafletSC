@@ -83,7 +83,7 @@ def load_files(filenames, sequencing_type, min_intron=50, max_intron=50000, min_
         if sequencing_type == "single_cell":
             juncs['split_up'] = juncs["cell_readcounts"].str.split(',')
             juncs=juncs.drop(["cell_readcounts"], axis=1)
-            juncs = juncs[juncs.num_cells_wjunc >= 2] # junction has at least one read count in at least two different cells (should also be changeable parameter)
+            juncs = juncs[juncs.num_cells_wjunc >= 3] # junction has at least one read count in at least two different cells (should also be changeable parameter)
         
         #remove junctions that have less than 2 total read counts covering it 
         juncs = juncs[juncs["score"] >= int(min_junc_reads)] 
@@ -156,17 +156,20 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
     #[1] extract all exons from gtf file provided 
-    gtf_exons = read_gtf(gtf_file) #to reduce the speed of this, can just get rows with exon in the feature column (preprocess this before running package)? check if really necessary
-    gtf_exons = gtf_exons[(gtf_exons["feature"] == "exon")]
+    gtf = read_gtf(gtf_file) #to reduce the speed of this, can just get rows with exon in the feature column (preprocess this before running package)? check if really necessary
+    gtf_exons = gtf[(gtf["feature"] == "exon")]
     #remove "chr" from chromosome names 
     gtf_exons['seqname'] = gtf_exons['seqname'].map(lambda x: x.lstrip('chr').rstrip('chr'))
     #make pyranges object
     gtf_exons_gr = pr.from_dict({"Chromosome": gtf_exons["seqname"], "Start": gtf_exons["start"], "End": gtf_exons["end"], "Strand": gtf_exons["strand"], "gene_id": gtf_exons["gene_id"], "gene_name": gtf_exons["gene_name"], "transcript_name": gtf_exons["transcript_name"], "transcript_id": gtf_exons["transcript_id"], "exon_number": gtf_exons["exon_number"]})
     #remove those exons where exon start == exon end 
     gtf_exons_gr = gtf_exons_gr[ ~ (gtf_exons_gr.Start == gtf_exons_gr.End)]
-    
+    #remove genes with no gene names (most likely novel genes)
+    gtf_exons_gr = gtf_exons_gr[ ~ (gtf_exons_gr.gene_name == "")]
     # When do I need to do this? depends on gtf file used? base 0 or 1?
     gtf_exons_gr.Start = gtf_exons_gr.Start-1
+    # Drop duplicated positions on same strand 
+    gtf_exons_gr = gtf_exons_gr.drop_duplicate_positions(strand=True)
 
     print("done extracting exons from gtf file")
 
@@ -238,8 +241,11 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
         clusters_wnomultiple_events=clusters_df.groupby(['Cluster'])['Chromosome', 'Start', 'End'].nunique().reset_index()
         clusters_wnomultiple_events=clusters_wnomultiple_events[(clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.Start) & (clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.End)].Cluster
         clusters_df = clusters_df[clusters_df['Cluster'].isin(clusters_wnomultiple_events) == False]
-    
+        # keep only clusters that pass 
+        gr = gr[gr.Cluster.isin(clusters_df.Cluster.unique())]
+
     # ensure that in every cluster, we only keep junctions that share splice sites 
+    print("Confirming that junctions in each cluster share splice sites")
     keep_junction_ids = clusters_df.groupby('Cluster').apply(filter_junctions_in_cluster)
     keep_junction_ids = np.concatenate(keep_junction_ids.values)
 
@@ -253,22 +259,21 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
     clusters_wnomultiple_events=clusters_df.groupby(['Cluster'])['Chromosome', 'Start', 'End'].nunique().reset_index()
     clusters_wnomultiple_events=clusters_wnomultiple_events[(clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.Start) & (clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.End)].Cluster
     clusters_df = clusters_df[clusters_df['Cluster'].isin(clusters_wnomultiple_events) == False]
-    
+    gr = gr[gr.Cluster.isin(clusters_df.Cluster.unique())]
+
     # ensure that every junction is only attributed to one gene's intron cluster 
     assert((clusters_df.groupby(['Cluster'])["gene_id"].nunique().reset_index().gene_id.unique() == 1))
-    #clusters_df = clusters_df.groupby(['Cluster'])
 
     df=df[df.junction_id.isin(clusters_df["junction_id"])] 
-    clusters=clusters_df[["junction_id", "Cluster", "gene_id"]].drop_duplicates()
+    clusters=clusters_df[["junction_id", "Cluster", "gene_id", "gene_name"]].drop_duplicates()
 
     #[6]  Get final list of junction coordinates and save to bed file (easy visualization in IGV)
-    gr = gr[gr.junction_id.isin(df["junction_id"])]
     gr = gr[["Chromosome", "Start", "End", "Strand", "junction_id", "Cluster", "gene_name", "gene_id"]]
     gr = gr.drop_duplicate_positions()
     gr.to_bed(junc_bed_file, chain=True) #add option to add prefix to file name
 
     # summary number of junctions per cluster 
-    summ_clusts_juncs=clusters[["Cluster", "junction_id"]].drop_duplicates().groupby("Cluster")["junction_id"].count().reset_index()
+    summ_clusts_juncs=clusters[["Cluster", "junction_id", "gene_name"]].drop_duplicates().groupby(["Cluster", "gene_name"])["junction_id"].count().reset_index()
     summ_clusts_juncs = summ_clusts_juncs.sort_values("junction_id", ascending=False)
 
     # check if junction doesn't belong to more than 1 cluster 
@@ -313,4 +318,4 @@ if __name__ == '__main__':
 #output_file="/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/clustered_junctions.txt" 
 #setting="canonical"
 #sequencing_type="single_cell"
-#python src/clustering/intron_clustering.py --gtf_file $gtf_file --junc_files $junc_files --output_file $output_file --setting $setting --sequencing_type $sequencing_type --min_intron=50 --max_intron=500000 --min_junc_reads=2 --threshold_inc=0.01 --junc_bed_file "PBMC_junctions_for_IGV.bed"
+#python src/clustering/intron_clustering_v2.py --gtf_file $gtf_file --junc_files $junc_files --output_file $output_file --setting $setting --sequencing_type $sequencing_type --min_intron=50 --max_intron=100000 --min_junc_reads=6 --threshold_inc=0.1 --junc_bed_file "PBMC_junctions_for_IGV.bed"

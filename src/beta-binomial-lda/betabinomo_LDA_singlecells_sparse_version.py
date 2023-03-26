@@ -92,8 +92,10 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
     print('Initialize VI params')
 
     # Cell states distributions , each junction in the FULL list of junctions get a ALPHA and PI parameter for each cell state
-    ALPHA = torch.from_numpy(np.random.uniform(1, 1, size=(J, K))).to(device)
-    PI = torch.from_numpy(np.random.uniform(1, 1, size=(J, K))).to(device)
+    ALPHA = torch.from_numpy(np.random.uniform(0.5, 50, size=(J, K))).to(device)
+    PI = torch.from_numpy(np.random.uniform(0.5, 50, size=(J, K))).to(device)
+    print(ALPHA)
+    print(PI)
 
     # Topic Proportions (cell states proportions), GAMMA ~ Dirichlet(eta) 
     GAMMA = torch.ones((N, K)).double().to(device)
@@ -101,7 +103,7 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
     # Choose random states to be close to 1 and the rest to be close to 0 
     # By intializing with one value being 100 and the rest being 1 
     # generate unique random indices for each row
-    random_indices = torch.randint(K, size=(N, 1)).to(device)
+    random_indices = torch.randint(K, size=(N, 2)).to(device)
 
     # create a mask for the random indices
     mask = torch.zeros((N, K)).to(device)
@@ -109,6 +111,7 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
 
     # set the random indices to 1000
     GAMMA = GAMMA * (1 - mask) + 1000 * mask
+    print(GAMMA)
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
     # Initialized to 1/K for each junction
@@ -373,7 +376,7 @@ if __name__ == "__main__":
     # Load data and define global variables 
     # get input data (this is standard output from leafcutter-sc pipeline so the column names will always be the same)
     
-    input_file = '/gpfs/commons/home/kisaev/leafcutter-sc/test.h5' #this should be an argument that gets fed in
+    input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5' #this should be an argument that gets fed in
     
     #input_file=args.input_file
     final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
@@ -392,7 +395,7 @@ if __name__ == "__main__":
     my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount)
 
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 200 # should also be an argument that gets fed in
+    num_iters = 50 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -408,11 +411,8 @@ if __name__ == "__main__":
         #make theta_f a dataframe 
         theta_f_plot = pd.DataFrame(theta_f.cpu())
         theta_f_plot['cell_id'] = cell_ids_conversion["cell_type"].to_numpy()
-
-        celltypes = theta_f_plot.pop("cell_id")
-        lut = dict(zip(celltypes.unique(), ["r", "b", "g", "orange", "purple", "brown", "pink", "gray", "olive", "cyan"]))
-        print(lut)
-        row_colors = celltypes.map(lut)
+        theta_f_plot_summ = theta_f_plot.groupby('cell_id').median()
+        print(theta_f_plot_summ)
 
         # plot ELBOs 
         plt.plot(elbos_all[1:])

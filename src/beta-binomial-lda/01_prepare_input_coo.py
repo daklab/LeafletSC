@@ -36,7 +36,7 @@ def main(intron_clusters, output_file):
 
     print("The number of intron clusters evaluated is " + str(len(clusts.Cluster.unique())))
 
-    summarized_data = clusts[["cell_id", "junction_id", "junc_count", "Cluster", "file_name", "score"]] #the score is the original column from regtools results, indicating total counts for junction across all single cells from that cell type
+    summarized_data = clusts[["cell_id", "junction_id", "gene_name", "junc_count", "Cluster", "file_name", "score"]] #the score is the original column from regtools results, indicating total counts for junction across all single cells from that cell type
     summarized_data["junc_count"] = summarized_data["junc_count"].astype(int)
     
     #need to get total cluster counts for each cell 
@@ -61,6 +61,7 @@ def main(intron_clusters, output_file):
 
     #Create a cell type column (file_name) will be used as that 
     summarized_data["cell_type"] = summarized_data["file_name"]
+    summarized_data.drop(["file_name"], axis=1, inplace=True)
 
     #save as hdf file 
     summarized_data.to_hdf(output_file + ".h5", key='df', mode='w')
