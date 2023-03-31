@@ -41,7 +41,7 @@ def load_cluster_data(input_file):
     summarized_data = pd.read_hdf(input_file, 'df')
 
     #for now just look at B and T cells
-    #summarized_data = summarized_data[summarized_data["cell_type"].isin(["B"])]
+    summarized_data = summarized_data[summarized_data["cell_type"].isin(["B", "MemoryCD4T"])]
     print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
@@ -99,18 +99,20 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
 
     # Topic Proportions (cell states proportions), GAMMA ~ Dirichlet(eta) 
     GAMMA = torch.ones((N, K)).double().to(device)
-    
+    # Multiple each row of Gamma by a different number 
+    GAMMA = GAMMA * torch.from_numpy(np.random.uniform(0.5, 50, size=(N, 1))).double().to(device)
+
     # Choose random states to be close to 1 and the rest to be close to 0 
     # By intializing with one value being 100 and the rest being 1 
     # generate unique random indices for each row
-    random_indices = torch.randint(K, size=(N, 2)).to(device)
+    #random_indices = torch.randint(K, size=(N, 1)).to(device)
 
     # create a mask for the random indices
-    mask = torch.zeros((N, K)).to(device)
-    mask.scatter_(1, random_indices, 1)
+    #mask = torch.zeros((N, K)).to(device)
+    #mask.scatter_(1, random_indices, 1)
 
     # set the random indices to 1000
-    GAMMA = GAMMA * (1 - mask) + 1000 * mask
+    #GAMMA = GAMMA * (1 - mask) + 1000 * mask
     print(GAMMA)
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
@@ -371,31 +373,32 @@ class IndexCountTensor():
     t_count: torch.Tensor
 
 # %%
+# put this into main code blow after 
+input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5'
+#input_file=args.input_file
+final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
+
+# global variables
+
+N = coo_cluster_sparse.shape[0]
+J = coo_cluster_sparse.shape[1]
+K = 3 # should also be an argument that gets fed in
+
+# initiate instance of data class containing junction and cluster indices for non-zero clusters 
+junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
+cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64).to(device)
+ycount = torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device)
+tcount = torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
+my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount)
+
+# %%
 if __name__ == "__main__":
 
     # Load data and define global variables 
     # get input data (this is standard output from leafcutter-sc pipeline so the column names will always be the same)
     
-    input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5' #this should be an argument that gets fed in
-    
-    #input_file=args.input_file
-    final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
-    
-    # global variables
-    
-    N = coo_cluster_sparse.shape[0]
-    J = coo_cluster_sparse.shape[1]
-    K = 5 # should also be an argument that gets fed in
-    
-    # initiate instance of data class containing junction and cluster indices for non-zero clusters 
-    junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
-    cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64).to(device)
-    ycount = torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device)
-    tcount = torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
-    my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount)
-
     num_trials = 1 # should also be an argument that gets fed in
-    num_iters = 50 # should also be an argument that gets fed in
+    num_iters = 100 # should also be an argument that gets fed in
 
     # loop over the number of trials (for now just testing using one trial but in general need to evaluate how performance is affected by number of trials)
     for t in range(num_trials):
@@ -422,3 +425,28 @@ if __name__ == "__main__":
 
 # %%
 #print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", height=5, ratio=2, marginal_ticks=True))
+
+celltypes = theta_f_plot.pop("cell_id")
+lut = dict(zip(celltypes.unique(), ["r", "b", "g", "orange", "purple", "brown", "pink", "gray", "olive", "cyan"]))
+print(lut)
+row_colors = celltypes.map(lut)
+print(sns.clustermap(theta_f_plot, row_colors=row_colors))
+# %%
+juncs_probs.diff()
+junc_ind=2
+clust=junction_ids_conversion[junction_ids_conversion["junction_id_index"]==junc_ind].Cluster
+juncs_include = junction_ids_conversion[junction_ids_conversion["Cluster"]==int(clust)]
+plot_clusts = final_data[final_data["junction_id_index"].isin(juncs_include["junction_id_index"].values)]
+plot_clusts
+#%%
+sns.histplot(data=plot_clusts[plot_clusts["cell_type"]=="MemoryCD4T"], x="juncratio", hue="junction_id_index", multiple="stack")
+
+# %%
+sns.histplot(data=plot_clusts[plot_clusts["cell_type"]=="B"], x="juncratio", hue="junction_id_index", multiple="stack")
+
+# %%
+sns.violinplot(data=plot_clusts, x="junction_id_index", y="juncratio")# %%
+
+# %%
+sns.histplot(juncs_probs.diff().cpu().numpy())
+# %%

@@ -76,7 +76,7 @@ def load_cluster_data(input_file):
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 # latest version of clusters     
-input_file = '/gpfs/commons/home/kisaev/leafcutter-sc/test.h5' #this should be an argument that gets fed in
+input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5'
     
 final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
     
@@ -130,18 +130,55 @@ sc.tl.pca(adata, svd_solver='arpack')
 print(sc.pl.pca_variance_ratio(adata, log=True))
 print(sc.pl.pca(adata, color="cell_type"))
 
-sc.pl.violin(adata, ['10_100540782_100544950', '10_102152530_102157018'], groupby='cell_type')
+#%%
 
-sc.pp.neighbors(adata, n_neighbors=10, n_pcs=40)
-sc.tl.leiden(adata)
+sc.pl.violin(adata, ['8_100703359_100704279'], groupby='cell_type', figsize=(10,3.5))
 
-sc.tl.paga(adata)
-sc.pl.paga(adata, plot=False)  # remove `plot=False` if you want to see the coarse-grained graph
-sc.tl.umap(adata)
-sc.pl.umap(adata, color='cell_type')
+#%%
+#sc.pp.neighbors(adata, n_neighbors=10, n_pcs=40)
+#sc.tl.leiden(adata)
 
-sc.tl.leiden(adata)
-sc.pl.umap(adata, color=['leiden', 'cell_type'])
+#sc.tl.paga(adata)
+#sc.pl.paga(adata, plot=False)  # remove `plot=False` if you want to see the coarse-grained graph
 
-sc.tl.rank_genes_groups(adata, 'leiden', method='t-test')
-sc.pl.rank_genes_groups(adata, n_genes=10, sharey=False)
+#%%
+#sc.tl.umap(adata)
+#sc.pl.umap(adata, color='cell_type')
+
+#sc.tl.leiden(adata)
+#sc.pl.umap(adata, color=['leiden', 'cell_type'])
+
+#sc.tl.rank_genes_groups(adata, 'leiden', method='t-test')
+#sc.pl.rank_genes_groups(adata, n_genes=10, sharey=False)
+# %%
+ax = sc.pl.correlation_matrix(adata, 'cell_type', figsize=(5,3.5))
+
+#%% 
+adata.var.sort_values("means", ascending=False).head(10)
+
+clust=5125
+clust_plot=junction_ids_conversion[junction_ids_conversion["Cluster"] == clust]
+print(clust_plot)
+
+plot_clusts=final_data[final_data["junction_id_index"].isin(clust_plot["junction_id_index"])]
+
+sns.violinplot(data=plot_clusts, x="cell_type", y="juncratio", hue="junction_id_index")
+
+#%% 
+# get the number of juncions appearing in each cell where juncratio > 0
+juncs_per_cell = plot_clusts[plot_clusts.juncratio>0].groupby("cell_id_index").agg({"junction_id_index": "count"})
+sns.histplot(juncs_per_cell.junction_id_index)
+# %%
+# check how many nonzero juncratios appear across each cell type in plot_clusts
+plot_clusts[plot_clusts["juncratio"] > 0].groupby(["cell_type", "junction_id_index"]).agg({"juncratio": "count"})
+
+# %%
+sns.histplot(data=plot_clusts[plot_clusts["cell_type"]=="B"], x="juncratio", hue="junction_id_index", multiple="stack")
+
+# %%
+sns.histplot(data=plot_clusts[plot_clusts["cell_type"]=="MemoryCD4T"], x="juncratio", hue="junction_id_index", multiple="stack")
+# %%
+sns.displot(
+    plot_clusts, x="juncratio", hue="junction_id_index", col="cell_type",
+    facet_kws=dict(margin_titles=False))
+# %%
