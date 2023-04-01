@@ -282,7 +282,7 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.01):
     log_PHI_t = E_log_theta[cell_index_tensor,:] + junc_counts_states + clust_counts_states
 
     # Compute the logsumexp of the tensor
-    tensor_logsumexp = torch.logsumexp(PHI_t, dim=1, keepdim=True)
+    tensor_logsumexp = torch.logsumexp(log_PHI_t, dim=1, keepdim=True)
     # Compute the exponentials of the tensor
     PHI_t = torch.exp(log_PHI_t - tensor_logsumexp)
     # Normalize every row in tensor so sum of row = 1
@@ -386,28 +386,34 @@ class IndexCountTensor():
         
 # %%
 # put this into main code blow after 
-input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5'
-#input_file=args.input_file
-final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
-# celltypes = ["B", "MemoryCD4T"]
+if True: 
+    input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5'
+    #input_file=args.input_file
+    final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(
+        input_file, celltypes = ["B", "MemoryCD4T"])
+    # 
 
-# global variables
+    # global variables
 
-N = coo_cluster_sparse.shape[0]
-J = coo_cluster_sparse.shape[1]
-K = 10 # should also be an argument that gets fed in
+    N = coo_cluster_sparse.shape[0]
+    J = coo_cluster_sparse.shape[1]
+    K = 3 # should also be an argument that gets fed in
 
-# initiate instance of data class containing junction and cluster indices for non-zero clusters 
-junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
-cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64).to(device)
-ycount = torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device)
-tcount = torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
+    # initiate instance of data class containing junction and cluster indices for non-zero clusters 
+    junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
+    cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64).to(device)
+    ycount = torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device)
+    tcount = torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
 
-M = len(cell_index_tensor)
-cells_lookup = torch.sparse_coo_tensor(torch.stack([cell_index_tensor, torch.arange(M)]), torch.ones(M).double()).to_sparse_csr()
-junctions_lookup = torch.sparse_coo_tensor(torch.stack([junc_index_tensor, torch.arange(M)]), torch.ones(M).double()).to_sparse_csr()
+    M = len(cell_index_tensor)
+    cells_lookup = torch.sparse_coo_tensor(
+        torch.stack([cell_index_tensor, torch.arange(M, device=device)]), 
+        torch.ones(M, device=device).double()).to_sparse_csr()
+    junctions_lookup = torch.sparse_coo_tensor(
+        torch.stack([junc_index_tensor, torch.arange(M, device=device)]), 
+        torch.ones(M, device=device).double()).to_sparse_csr()
 
-my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount, cells_lookup, junctions_lookup)
+    my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount, cells_lookup, junctions_lookup)
 
 # %%
 if __name__ == "__main__":
