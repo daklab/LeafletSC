@@ -19,9 +19,15 @@ import seaborn as sns
 import os 
 import argparse
 
+import sklearn.cluster
+
 torch.manual_seed(42)
 
 DTYPE = torch.float # save memory
+ETA = 1. # define here to make sure it is consistent between ELBO and update
+# alpha_prior=0.65, beta_prior=0.65
+alpha_prior=1.
+pi_prior=1.
 
 # %%    
 #parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
@@ -85,7 +91,7 @@ def load_cluster_data(input_file, celltypes = None):
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Functions for probabilistic beta-binomial AS model 
 
-def init_var_params(J, K, N, final_data, eps = 1e-2):
+def init_var_params(J, K, N, final_data, init_labels = None, eps = 1e-2):
     
     '''
     Function for initializing variational parameters using global variables N, J, K   
@@ -100,8 +106,18 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
     PI = 1. + torch.rand(J, K, dtype=DTYPE, device = device)
 
     # Topic Proportions (cell states proportions), GAMMA ~ Dirichlet(eta) 
-    GAMMA = 1. + torch.rand(N, K, dtype=DTYPE, device = device) * 0.1
-
+    if not init_labels is None:
+        GAMMA = torch.full((N, K), 1./K, dtype=DTYPE, device = device)
+        GAMMA[torch.arange(N),init_labels] = 2.
+        PHI = GAMMA[final_data.cell_index,:] # will get normalized below
+    else:
+        GAMMA = 1. + torch.rand(N, K, dtype=DTYPE, device = device) * 0.1
+        M = len(final_data.junc_index) # number of cell-junction pairs coming from non zero clusters
+        #PHI = torch.ones((M, K), dtype=DTYPE).to(device) * 1/K
+        PHI = torch.rand(M, K, dtype=DTYPE, device = device)
+    
+    PHI /= PHI.sum(1, keepdim=True)
+    
     # Choose random states to be close to 1 and the rest to be close to 0 
     # By intializing with one value being 100 and the rest being 1 
     # generate unique random indices for each row
@@ -116,10 +132,7 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
     # Initialized to 1/K for each junction
-    M = len(final_data.junc_index) # number of cell-junction pairs coming from non zero clusters
-    #PHI = torch.ones((M, K), dtype=DTYPE).to(device) * 1/K
-    PHI = torch.rand(M, K, dtype=DTYPE, device = device)
-    PHI /= PHI.sum(1, keepdim=True)
+
     
     return ALPHA, PI, GAMMA, PHI
 
@@ -127,7 +140,7 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
 
 # Functions for calculating the ELBO
 
-def E_log_pbeta(ALPHA, PI, alpha_prior=0.65, pi_prior=0.65):
+def E_log_pbeta(ALPHA, PI):
     '''
     Expected log joint of our latent variable B ~ Beta(a, b)
     Calculated here in terms of its variational parameters ALPHA and PI 
@@ -143,14 +156,14 @@ def E_log_pbeta(ALPHA, PI, alpha_prior=0.65, pi_prior=0.65):
     return(E_log_pB)
 
 
-def E_log_ptheta(GAMMA, eta=0.1):
+def E_log_ptheta(GAMMA):
     
     '''
     We are assigning a K vector to each cell that has the proportion of each K present in each cell 
     GAMMA is a variational parameter assigned to each cell, follows a K dirichlet
     '''
 
-    E_log_p_theta = torch.sum((eta - 1) * sum(torch.digamma(GAMMA).T - torch.digamma(torch.sum(GAMMA, dim=1))))
+    E_log_p_theta = (ETA - 1.) * (GAMMA.digamma() - GAMMA.sum(dim=1, keepdim=True).digamma()).sum()
     return(E_log_p_theta)
 
 # %%
@@ -230,7 +243,7 @@ def get_elbo(ALPHA, PI, GAMMA, PHI, final_data):
 
 # %%
 
-def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.01):
+def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data):
 
     '''
     Update variational parameters for z and theta distributions
@@ -261,18 +274,18 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.01):
     PHI /= torch.sum(PHI, dim=1, keepdim=True) # in principle not necessary
     
     # Update GAMMA using the updated PHI
-    GAMMA = theta_prior + final_data.cells_lookup @ PHI
+    GAMMA = ETA + final_data.cells_lookup @ PHI
     
     return(PHI, GAMMA)    
 
-def update_beta(J, K, PHI, final_data, alpha_prior=0.65, beta_prior=0.65):
+def update_beta(J, K, PHI, final_data):
     
     '''
     Update variational parameters for beta distribution
     '''
     
     ALPHA = final_data.ycount_lookup @ PHI + alpha_prior
-    PI = final_data.tcount_lookup @ PHI + beta_prior
+    PI = final_data.tcount_lookup @ PHI + pi_prior
     
     return(ALPHA, PI)
 
@@ -283,7 +296,8 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, final_data):
     '''
     Update variational parameters for beta, theta and z distributions
     '''
-    # TODO: is this order good? 
+    # TODO: is this order good? idea is to update q(beta) first since we may have a 
+    # "good" initialization for GAMMA and PHI
     ALPHA, PI = update_beta(J, K , PHI, final_data)
     PHI, GAMMA = update_z_theta(ALPHA, PI, GAMMA, PHI, final_data) 
 
@@ -291,13 +305,13 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, final_data):
 
 # %%
 
-def calculate_CAVI(J, K, N, my_data, num_iterations=5):
+def calculate_CAVI(J, K, N, my_data, init_labels = None, num_iterations=5):
     
     '''
     Calculate CAVI
     '''
 
-    ALPHA, PI, GAMMA, PHI = init_var_params(J, K, N, my_data)
+    ALPHA, PI, GAMMA, PHI = init_var_params(J, K, N, my_data, init_labels = init_labels)
     torch.cuda.empty_cache()
 
     elbos = [ get_elbo(ALPHA, PI, GAMMA, PHI, my_data) ]
@@ -311,17 +325,44 @@ def calculate_CAVI(J, K, N, my_data, num_iterations=5):
     elbos.append( get_elbo(ALPHA, PI, GAMMA, PHI, my_data) )
     
     print("got the first ELBO after updates ^")
-    iter = 0
+    iteration = 0
 
-    while(elbos[-1] > elbos[-2]) and (iter < num_iterations):
-        print("ELBO not converged, re-running CAVI iteration # " + str(iter+1))
+    #while(elbos[-1] > elbos[-2]) and (iteration < num_iterations):
+    while (iteration < num_iterations):
+        print("ELBO not converged, re-running CAVI iteration # ", iteration+1)
         ALPHA, PI, GAMMA, PHI = update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, my_data)
         elbo = get_elbo(ALPHA, PI, GAMMA, PHI, my_data)
         elbos.append(elbo)
-        iter = iter + 1
+        iteration += 1
     
-    print("ELBO converged, CAVI iteration # " + str(iter+1) + " complete")
+    print("ELBO converged, CAVI iteration # ", iteration+1, " complete")
     return(ALPHA, PI, GAMMA, PHI, elbos)
+
+def pca_kmeans_init(final_data, junc_index_tensor, cell_index_tensor, K, scale_by_sv = True):
+    junc_ratios_sparse = torch.sparse_coo_tensor(
+        torch.stack([junc_index_tensor,cell_index_tensor]),
+        torch.tensor(final_data.juncratio.values, dtype=DTYPE, device=device)
+    ) # to_sparse_csr() # doesn't work with CSR for some reason? 
+    
+    #import scipy.sparse as sp
+    #junc_ratios_sp = sp.coo_matrix((final_data.juncratio.values,(final_data['junction_id_index'].values, final_data['cell_id_index'].values)))
+    #junc_mean = torch.tensor(junc_ratios_sp.mean(1), dtype=DTYPE, device=device)
+    
+    #V, pc_sd, U = torch.pca_lowrank(junc_ratios_sparse, q=20, niter=5, center = False) # , M = junc_mean.T) # out of memory trying this? 
+    U, pc_sd, V = torch.svd_lowrank(junc_ratios_sparse, q=20, niter=5) #, M = junc_mean)
+ # coo_matrix((data, (i, j)), [shape=(M, N)])
+    
+    cell_pcs = V.cpu().numpy()
+    
+    if scale_by_sv: cell_pcs *= pc_sd.cpu().numpy()
+    
+    kmeans = sklearn.cluster.KMeans(
+        n_clusters=K, 
+        random_state=0, 
+        init='k-means++',
+        n_init=10).fit(cell_pcs)
+
+    return V.cpu().numpy(), pc_sd.cpu().numpy(), kmeans.labels_
 
 # %%
 @dataclass
@@ -336,7 +377,7 @@ class IndexCountTensor():
         
 # %%
 # put this into main code blow after 
-if False: 
+if True: 
     input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5'
     #input_file=args.input_file
     final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(
@@ -370,7 +411,20 @@ if False:
 
     my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount, cells_lookup, ycount_lookup, tcount_lookup)
 
-K = 10 # should also be an argument that gets fed in
+    K = 15 # should also be an argument that gets fed in
+
+
+    junc_sparse = torch.sparse_coo_tensor(
+        torch.stack([junc_index_tensor,cell_index_tensor]),
+        torch.tensor(final_data.junc_count.values, dtype=DTYPE, device=device)
+    )
+    cell_tots = torch.sparse.sum(junc_sparse, 0)
+    plt.hist(cell_tots.to_dense().cpu().numpy(), 100)
+    plt.xlabel("Number of spliced reads per cell (post UMI collapsing)")
+    plt.ylabel("Frequency")
+    plt.savefig("reads_per_cell_hist.pdf")
+
+    cell_pcs, pc_sd, init_labels = pca_kmeans_init(final_data, junc_index_tensor, cell_index_tensor, K)
 
 # %%
 if __name__ == "__main__":
@@ -387,7 +441,7 @@ if __name__ == "__main__":
         # run coordinate ascent VI
         print(K)
 
-        ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = calculate_CAVI(J, K, N, my_data, num_iters)
+        ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = calculate_CAVI(J, K, N, my_data, init_labels = init_labels, num_iterations = num_iters)
         elbos_all = np.array(elbos_all)
         juncs_probs = ALPHA_f / (ALPHA_f+PI_f)
         #theta_f = distributions.Dirichlet(GAMMA_f).sample()
@@ -400,10 +454,73 @@ if __name__ == "__main__":
         print(theta_f_plot_summ)
 
         # plot ELBOs 
-        plt.plot(elbos_all[1:])
+        plt.plot(elbos_all[2:])
 
         # save the learned variational parameters
         #np.savez('variational_params.npz', ALPHA_f=ALPHA_f, PI_f=PI_f, GAMMA_f=GAMMA_f, PHI_f=PHI_f, juncs_probs=juncs_probs, theta_f=theta_f, z_f=z_f)
+
+
+x = theta_f.cpu().numpy()
+x -= x.mean(1,keepdims=True)
+x /= x.std(1,keepdims=True)
+plt.hist(x.flatten(),100)
+pd.crosstab( cell_ids_conversion["cell_type"], x.argmax(axis=1) )
+
+pcs_scaled = cell_pcs.copy()
+pcs_scaled -= pcs_scaled.mean(1,keepdims=True)
+pcs_scaled /= pcs_scaled.std(1,keepdims=True)
+plt.hist(pcs_scaled.flatten(),100)
+
+pcs_sd_scaled = cell_pcs * pc_sd
+
+import sklearn.manifold 
+import plotnine as p9
+
+PCs_embedded = sklearn.manifold.TSNE(
+    n_components=2, 
+    learning_rate='auto',
+    init='random', 
+    perplexity=30).fit_transform(pcs_sd_scaled)
+
+PC_embed_df = pd.DataFrame(PCs_embedded, columns = ["x","y"])
+PC_embed_df["cell_type"] = cell_ids_conversion["cell_type"].to_numpy()
+#p9.ggplot(X_embed_df, p9.aes(x = "x", y="y", color = "cell_type")) + p9.geom_point()
+
+plt.figure(figsize=[8,6])
+sns.scatterplot(x = "x",y = "y", hue="cell_type", data= PC_embed_df, edgecolor = 'none', alpha = 0.1)
+plt.xlabel("tSNE 1")
+plt.ylabel("tSNE 2")
+ax = plt.gca()
+ax.set_xticks([])
+ax.set_yticks([])
+plt.savefig("pca_eig_scaled.pdf")
+
+
+if False: 
+    import umap
+
+    fit = umap.UMAP(
+        n_neighbors = 100, 
+        unique = False)
+    u = fit.fit_transform(pcs_scaled) # ok well this just never runs
+
+PCs_embedded = sklearn.manifold.TSNE(
+    n_components=2, 
+    learning_rate='auto',
+    init='random', 
+    perplexity=100).fit_transform(pcs_scaled)
+
+X_embed_df = pd.DataFrame(X_embedded, columns = ["x","y"])
+X_embed_df["cell_type"] = cell_ids_conversion["cell_type"].to_numpy()
+sns.scatterplot(x = "x",y = "y", hue="cell_type", data= X_embed_df, edgecolor = 'none', alpha = 0.1)
+
+X_embed_df = pd.DataFrame(pcs_scaled[:,:2], columns = ["x","y"])
+X_embed_df["cell_type"] = cell_ids_conversion["cell_type"].to_numpy()
+
+plt.figure(figsize=[12,8])
+sns.scatterplot(x = "x",y = "y", hue="cell_type", data= X_embed_df, edgecolor = 'none', alpha = 0.1)
+
+
 
 # %%
 #print(sns.jointplot(data=final_data, x = "junc_count",y = "juncratio", height=5, ratio=2, marginal_ticks=True))
@@ -412,7 +529,7 @@ celltypes = theta_f_plot.pop("cell_id")
 lut = dict(zip(celltypes.unique(), ["r", "b", "g", "orange", "purple", "brown", "pink", "gray", "olive", "cyan"]))
 print(lut)
 row_colors = celltypes.map(lut)
-#print(sns.clustermap(theta_f_plot, row_colors=row_colors))
+print(sns.clustermap(theta_f_plot, row_colors=row_colors))
 # %%
 juncs_probs.diff()
 junc_ind=2
