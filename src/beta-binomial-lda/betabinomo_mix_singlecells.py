@@ -373,9 +373,6 @@ class IndexCountTensor():
     tcount_lookup_T: torch.Tensor 
         
 
-        
-# %%
-# put this into main code blow after 
 if True: 
     input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5'
     #input_file=args.input_file
@@ -532,7 +529,7 @@ if __name__ == "__main__":
     start_time = time.time()
     results = [ calculate_CAVI(J, K, N, my_data, init_labels = None, num_iterations = num_iters) for t in range(num_trials) ]
     print(time.time() - start_time)
-        
+    
     best = np.argmax([ g[-1][-1] for g in results ]) # final ELBO
     ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = results[best]
         # run coordinate ascent VI
