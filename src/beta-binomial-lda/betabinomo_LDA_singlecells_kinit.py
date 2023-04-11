@@ -19,6 +19,7 @@ import argparse
 import sklearn.cluster
 
 
+
 # %%    
 #parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
 
@@ -30,52 +31,6 @@ import sklearn.cluster
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #                      Utilities
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-# load data 
-
-def load_cluster_data(input_file, celltypes = None):
-
-   # read in hdf file 
-    summarized_data = pd.read_hdf(input_file, 'df')
-
-    #for now just look at B and T cells
-    if celltypes:
-        summarized_data = summarized_data[summarized_data["cell_type"].isin(celltypes)]
-    print(summarized_data.cell_type.unique())
-    summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
-    summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
-
-    coo = summarized_data[["cell_id_index", "junction_id_index", "junc_count", "Cluster_Counts", "Cluster", "junc_ratio"]]
-
-    # just some sanity checks to make sure indices are in order 
-    cell_ids_conversion = summarized_data[["cell_id_index", "cell_id", "cell_type"]].drop_duplicates()
-    cell_ids_conversion = cell_ids_conversion.sort_values("cell_id_index")
-
-    junction_ids_conversion = summarized_data[["junction_id_index", "junction_id", "Cluster"]].drop_duplicates()
-    junction_ids_conversion = junction_ids_conversion.sort_values("junction_id_index")
- 
-    # make coo_matrix for junction counts
-    coo_counts_sparse = coo_matrix((coo.junc_count, (coo.cell_id_index, coo.junction_id_index)), shape=(len(coo.cell_id_index.unique()), len(coo.junction_id_index.unique())))
-    coo_counts_sparse = coo_counts_sparse.tocsr()
-    juncs_nonzero = pd.DataFrame(np.transpose(coo_counts_sparse.nonzero()))
-    juncs_nonzero.columns = ["cell_id_index", "junction_id_index"]
-    juncs_nonzero["junc_count"] = coo_counts_sparse.data
-
-    # do the same for cluster counts 
-    cells_only = coo[["cell_id_index", "Cluster", "Cluster_Counts"]].drop_duplicates()
-    merged_df = pd.merge(cells_only, junction_ids_conversion)
-    coo_cluster_sparse = coo_matrix((merged_df.Cluster_Counts, (merged_df.cell_id_index, merged_df.junction_id_index)), shape=(len(merged_df.cell_id_index.unique()), len(merged_df.junction_id_index.unique())))
-    coo_cluster_sparse = coo_cluster_sparse.tocsr()
-    cluster_nonzero = pd.DataFrame(np.transpose(coo_cluster_sparse.nonzero()))
-    cluster_nonzero.columns = ["cell_id_index", "junction_id_index"]
-    cluster_nonzero["cluster_count"] = coo_cluster_sparse.data
-
-    final_data = pd.merge(juncs_nonzero, cluster_nonzero, how='outer').fillna(0)
-    final_data["clustminjunc"] = final_data["cluster_count"] - final_data["junc_count"]
-    final_data["juncratio"] = final_data["junc_count"] / final_data["cluster_count"] 
-    final_data = final_data.merge(cell_ids_conversion, on="cell_id_index", how="left")
-    
-    return(final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion)
 
 # %% 
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -327,36 +282,6 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
     
     print("ELBO converged, CAVI iteration # ", iteration+1, " complete")
     return(ALPHA, PI, GAMMA, PHI, elbos)
-
-def pca_kmeans_init(final_data, junc_index_tensor, cell_index_tensor, K, float_type, scale_by_sv = True):
-    """This has an issue as currently implemented that all the junction ratios are positive,
-    and missing==0, so it is definitely confounded by expression. Normalizing just the observed
-    junctions might help. """
-    
-    junc_ratios_sparse = torch.sparse_coo_tensor(
-        torch.stack([junc_index_tensor,cell_index_tensor]),
-        torch.tensor(final_data.juncratio.values, **float_type)
-    ) # to_sparse_csr() # doesn't work with CSR for some reason? 
-    
-    #import scipy.sparse as sp
-    #junc_ratios_sp = sp.coo_matrix((final_data.juncratio.values,(final_data['junction_id_index'].values, final_data['cell_id_index'].values)))
-    #junc_mean = torch.tensor(junc_ratios_sp.mean(1)**float_type)
-    
-    #V, pc_sd, U = torch.pca_lowrank(junc_ratios_sparse, q=20, niter=5, center = False) # , M = junc_mean.T) # out of memory trying this? 
-    U, pc_sd, V = torch.svd_lowrank(junc_ratios_sparse, q=20, niter=5) #, M = junc_mean)
- # coo_matrix((data, (i, j)), [shape=(M, N)])
-    
-    cell_pcs = V.cpu().numpy()
-    
-    if scale_by_sv: cell_pcs *= pc_sd.cpu().numpy()
-    
-    kmeans = sklearn.cluster.KMeans(
-        n_clusters=K, 
-        random_state=0, 
-        init='k-means++',
-        n_init=10).fit(cell_pcs)
-
-    return V.cpu().numpy(), pc_sd.cpu().numpy(), kmeans.labels_
 
 # %%
 @dataclass
