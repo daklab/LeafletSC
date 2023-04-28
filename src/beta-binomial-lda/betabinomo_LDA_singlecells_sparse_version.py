@@ -21,6 +21,8 @@ import argparse
 
 torch.manual_seed(42)
 
+DTYPE = torch.float # save memory
+
 # %%    
 #parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
 
@@ -35,13 +37,14 @@ torch.manual_seed(42)
 
 # load data 
 
-def load_cluster_data(input_file):
+def load_cluster_data(input_file, celltypes = None):
 
    # read in hdf file 
     summarized_data = pd.read_hdf(input_file, 'df')
 
     #for now just look at B and T cells
-    summarized_data = summarized_data[summarized_data["cell_type"].isin(["B", "MemoryCD4T"])]
+    if celltypes:
+        summarized_data = summarized_data[summarized_data["cell_type"].isin(celltypes)]
     print(summarized_data.cell_type.unique())
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
@@ -75,6 +78,7 @@ def load_cluster_data(input_file):
     final_data["clustminjunc"] = final_data["cluster_count"] - final_data["junc_count"]
     final_data["juncratio"] = final_data["junc_count"] / final_data["cluster_count"] 
     final_data = final_data.merge(cell_ids_conversion, on="cell_id_index", how="left")
+    
     return(final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion)
 
 # %% 
@@ -92,15 +96,11 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
     print('Initialize VI params')
 
     # Cell states distributions , each junction in the FULL list of junctions get a ALPHA and PI parameter for each cell state
-    ALPHA = torch.from_numpy(np.random.uniform(0.5, 50, size=(J, K))).to(device)
-    PI = torch.from_numpy(np.random.uniform(0.5, 50, size=(J, K))).to(device)
-    print(ALPHA)
-    print(PI)
+    ALPHA = 1. + torch.rand(J, K, dtype=DTYPE, device = device)
+    PI = 1. + torch.rand(J, K, dtype=DTYPE, device = device)
 
     # Topic Proportions (cell states proportions), GAMMA ~ Dirichlet(eta) 
-    GAMMA = torch.ones((N, K)).double().to(device)
-    # Multiple each row of Gamma by a different number 
-    GAMMA = GAMMA * torch.from_numpy(np.random.uniform(0.5, 50, size=(N, 1))).double().to(device)
+    GAMMA = 1. + torch.rand(N, K, dtype=DTYPE, device = device) * 0.1
 
     # Choose random states to be close to 1 and the rest to be close to 0 
     # By intializing with one value being 100 and the rest being 1 
@@ -113,12 +113,13 @@ def init_var_params(J, K, N, final_data, eps = 1e-2):
 
     # set the random indices to 1000
     #GAMMA = GAMMA * (1 - mask) + 1000 * mask
-    print(GAMMA)
 
     # Cell State Assignments, each cell gets a PHI value for each of its junctions
     # Initialized to 1/K for each junction
     M = len(final_data.junc_index) # number of cell-junction pairs coming from non zero clusters
-    PHI = torch.ones((M, K)).double().to(device) * 1/K
+    #PHI = torch.ones((M, K), dtype=DTYPE).to(device) * 1/K
+    PHI = torch.rand(M, K, dtype=DTYPE, device = device)
+    PHI /= PHI.sum(1, keepdim=True)
     
     return ALPHA, PI, GAMMA, PHI
 
@@ -159,38 +160,25 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI, final_data):
     sum over N cells and J junctions... where we are looking at the exp log p(z|theta)
     plus the exp log p(x|beta and z)
     '''
-
-    # make copies of the variational parameters - do I need to do this here? 
-    #ALPHA_t = copy.deepcopy(ALPHA)
-    #PI_t = copy.deepcopy(PI)
-    #PHI_t = copy.deepcopy(PHI)
-    #GAMMA_t = copy.deepcopy(GAMMA)
-
-    ALPHA_t = ALPHA
-    PI_t = PI
-    PHI_t = PHI
-    GAMMA_t = GAMMA
-    
-    # Set up indicies for extracting correct values from ALPHA, PI and PHI
-    junc_index_tensor = final_data.junc_index
-    cell_index_tensor = final_data.cell_index
-
-    ycount=final_data.y_count.to(device)
-    tcount=final_data.t_count.to(device)
-
     ### E[log p(Z_ij|THETA_i)]    
-    all_digammas = (torch.digamma(GAMMA_t) - torch.digamma(torch.sum(GAMMA_t, dim=1)).unsqueeze(1)) # shape: (N, K)
+    all_digammas = torch.digamma(GAMMA) - torch.digamma(torch.sum(GAMMA, dim=1, keepdim=True)) # shape: (N, K)
             
     # Element-wise multiplication and sum over junctions-Ks and across cells 
-    PHI_t_times_all_digammas = torch.sum(PHI_t * all_digammas[cell_index_tensor])
-    E_log_p_xz_part1 = PHI_t_times_all_digammas
-
+    #E_log_p_xz_part1_ = torch.sum(PHI * all_digammas[cell_index_tensor,:]) # memory intensive :(
+    E_log_p_xz_part1 = torch.sum( (final_data.cells_lookup @ PHI) * all_digammas)  # bit better
+    
     ### E[log p(Y_ij | BETA, Z_ij)] 
-    junc_counts_states = ycount.squeeze()[:, None] * (torch.digamma(ALPHA_t[junc_index_tensor, :]) - torch.digamma(ALPHA_t[junc_index_tensor, :]+PI_t[junc_index_tensor, :]))
-    clust_counts_states = tcount.squeeze()[:, None] * (torch.digamma(PI_t[junc_index_tensor, :]) - torch.digamma(ALPHA_t[junc_index_tensor, :]+PI_t[junc_index_tensor, :]))
-    part2 = junc_counts_states + clust_counts_states
+    alpha_pi_digamma = (ALPHA + PI).digamma()
+    E_log_beta = ALPHA.digamma() - alpha_pi_digamma
+    E_log_1m_beta = PI.digamma() - alpha_pi_digamma
+    
+    #part2 = final_data.y_count * E_log_beta[junc_index_tensor, :] + final_data.t_count * E_log_1m_beta[junc_index_tensor, :]
+    #part2 *= PHI # this is lower memory use because multiplication is in place
+    
+    # confirmed this gives the same answer
+    part2 = (final_data.ycount_lookup @ PHI) * E_log_beta + (final_data.tcount_lookup @ PHI) * E_log_1m_beta 
 
-    E_log_p_xz_part2 = torch.sum(PHI_t * part2) #check that summation dimension is correct****
+    E_log_p_xz_part2 = part2.sum() 
     
     E_log_p_xz = E_log_p_xz_part1 + E_log_p_xz_part2
     return(E_log_p_xz)
@@ -199,7 +187,7 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI, final_data):
 
 ## Define all the entropies
 
-def get_entropy(ALPHA, PI, GAMMA, PHI):
+def get_entropy(ALPHA, PI, GAMMA, PHI, eps = 1e-10):
     
     '''
     H(X) = E(-logP(X)) for random variable X whose pdf is P
@@ -207,16 +195,18 @@ def get_entropy(ALPHA, PI, GAMMA, PHI):
 
     #1. Sum over Js, entropy of beta distribution for each K given its variational parameters     
     beta_dist = distributions.Beta(ALPHA, PI)
-    E_log_q_beta = beta_dist.entropy().mean(dim=1).sum()
+    #E_log_q_beta = beta_dist.entropy().mean(dim=1).sum()
+    E_log_q_beta = beta_dist.entropy().sum()
 
     #2. Sum over all cells, entropy of dirichlet cell state proportions given its variational parameter 
     dirichlet_dist = distributions.Dirichlet(GAMMA)
     E_log_q_theta = dirichlet_dist.entropy().sum()
     
     #3. Sum over all cells and junctions, entropy of  categorical PDF given its variational parameter (PHI_ij)
-    E_log_q_z = torch.sum(-(PHI * torch.log(PHI)))
+    E_log_q_z = -torch.sum(PHI * torch.log(PHI + eps)) # memory intensive. eps to handle PHI==0 correctly
     
     entropy_term = E_log_q_beta + E_log_q_theta + E_log_q_z
+    
     return entropy_term
 
 # %%
@@ -233,9 +223,9 @@ def get_elbo(ALPHA, PI, GAMMA, PHI, final_data):
 
     #3. Calculate ELBO
     elbo = E_log_pbeta_val + E_log_ptheta_val + E_log_pzx_val + entropy
-    
+    assert(not elbo.isnan())
     print('ELBO: {}'.format(elbo))
-    return(elbo)
+    return(elbo.item())
 
 
 # %%
@@ -246,50 +236,34 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, theta_prior=0.01):
     Update variational parameters for z and theta distributions
     '''                
 
-    GAMMA_t = GAMMA
-    ALPHA_t = ALPHA
-    PI_t = PI
-
-    # part1 should be good to go 
-    part1 = torch.digamma(GAMMA_t) - torch.digamma(torch.sum(GAMMA_t)).unsqueeze(0) # shape: N x K      
-
-    # Set up indicies for extracting correct values from PHI
-    junc_index_tensor = final_data.junc_index
-    cell_index_tensor = final_data.cell_index
-
-    ycount=final_data.y_count.to(device)
-    tcount=final_data.t_count.to(device)
-
-    junc_counts_states = ycount.squeeze()[:, None] * (torch.digamma(ALPHA_t[junc_index_tensor, :]) - torch.digamma(ALPHA_t[junc_index_tensor, :]+PI_t[junc_index_tensor, :]))
-    clust_counts_states = tcount.squeeze()[:, None] * (torch.digamma(PI_t[junc_index_tensor, :]) - torch.digamma(ALPHA_t[junc_index_tensor, :]+PI_t[junc_index_tensor, :]))
-    part2 = junc_counts_states + clust_counts_states
-
-    # Now I need to add values across cells with the same cell_id_index with GAMMA likelihood
-    result_tensor = torch.zeros((len(junc_index_tensor), K), dtype=torch.float64).to(device)
+    alpha_pi_digamma = (ALPHA + PI).digamma()
+    E_log_beta = ALPHA.digamma() - alpha_pi_digamma
+    E_log_1m_beta = PI.digamma() - alpha_pi_digamma
     
-    # Add the values from part2 to the appropriate indices
-    result_tensor += part2
+    # Update PHI
 
     # Add the values from part1 to the appropriate indices
-    counts = torch.bincount(cell_index_tensor)
-    expanded_part1 = part1.repeat_interleave(counts, dim=0)
-    result_tensor += expanded_part1
+    E_log_theta = torch.digamma(GAMMA) - torch.digamma(torch.sum(GAMMA, dim=1, keepdim=True)) # shape: N x K
+    
+    #counts = torch.bincount(final_data.cell_index)
+    PHI[:,:] = E_log_theta[final_data.cell_index,:] # in place
+    PHI += final_data.y_count[:, None] * E_log_beta[final_data.junc_index, :] 
+    PHI += final_data.t_count[:, None] * E_log_1m_beta[final_data.junc_index, :] # this is really log_PHI! memory :(
 
-    # Update PHI_t
-    PHI_t = result_tensor
     # Compute the logsumexp of the tensor
-    tensor_logsumexp = torch.logsumexp(PHI_t, dim=1)
+    PHI -= torch.logsumexp(PHI, dim=1, keepdim=True) 
+    
     # Compute the exponentials of the tensor
-    PHI_t = torch.exp(PHI_t - tensor_logsumexp.unsqueeze(1))
+    #PHI = PHI.exp() # can this be done in place? Yes!
+    torch.exp(PHI, out=PHI) # in place! 
+    
     # Normalize every row in tensor so sum of row = 1
-    PHI_t = PHI_t / torch.sum(PHI_t, dim=1).unsqueeze(1)
-    PHI_up = PHI_t 
-        
-    # Update GAMMA_c using the updated PHI_c
-    # Make sure to only add junctions that belong to the same cell
-    cell_sums = torch.zeros(N, K, dtype=torch.float64).to(device)
-    GAMMA_up = theta_prior + cell_sums.index_add_(0, cell_index_tensor, PHI_up)
-    return(PHI_up, GAMMA_up)    
+    PHI /= torch.sum(PHI, dim=1, keepdim=True) # in principle not necessary
+    
+    # Update GAMMA using the updated PHI
+    GAMMA = theta_prior + final_data.cells_lookup @ PHI
+    
+    return(PHI, GAMMA)    
 
 def update_beta(J, K, PHI, final_data, alpha_prior=0.65, beta_prior=0.65):
     
@@ -297,22 +271,10 @@ def update_beta(J, K, PHI, final_data, alpha_prior=0.65, beta_prior=0.65):
     Update variational parameters for beta distribution
     '''
     
-    # Re-initialize ALPHA and PI values
-    ALPHA_t = torch.ones((J, K), dtype=torch.float64).to(device) * alpha_prior
-    PI_t = torch.ones((J, K), dtype=torch.float64).to(device) * beta_prior
-
-    # Calculate alphas and pis for each cell-junction pair 
-    alphas = final_data.y_count.to(device) * PHI
-    pis = final_data.t_count.to(device) * PHI #t_count is cluster counts minus junction counts
+    ALPHA = final_data.ycount_lookup @ PHI + alpha_prior
+    PI = final_data.tcount_lookup @ PHI + beta_prior
     
-    # Create a tensor of the unique junction indices
-    index_tensor = final_data.junc_index.to(device)
-
-    # Use scatter_add to sum the values for each unique index
-    ALPHA_t = torch.scatter_add(ALPHA_t, 0, index_tensor[:, None].repeat(1, alphas.shape[1]), alphas)
-    PI_t = torch.scatter_add(PI_t, 0, index_tensor[:, None].repeat(1, pis.shape[1]), pis)
-    
-    return(ALPHA_t, PI_t)
+    return(ALPHA, PI)
 
 # %%   
 
@@ -321,11 +283,11 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, final_data):
     '''
     Update variational parameters for beta, theta and z distributions
     '''
+    # TODO: is this order good? 
+    ALPHA, PI = update_beta(J, K , PHI, final_data)
+    PHI, GAMMA = update_z_theta(ALPHA, PI, GAMMA, PHI, final_data) 
 
-    PHI_up, GAMMA_up = update_z_theta(ALPHA, PI, GAMMA, PHI, final_data) 
-    ALPHA_up, PI_up = update_beta(J, K , PHI_up, final_data)
-
-    return(ALPHA_up, PI_up, GAMMA_up, PHI_up)
+    return(ALPHA, PI, GAMMA, PHI)
 
 # %%
 
@@ -335,34 +297,31 @@ def calculate_CAVI(J, K, N, my_data, num_iterations=5):
     Calculate CAVI
     '''
 
-    ALPHA_init, PI_init, GAMMA_init, PHI_init = init_var_params(J, K, N, my_data)
+    ALPHA, PI, GAMMA, PHI = init_var_params(J, K, N, my_data)
     torch.cuda.empty_cache()
 
-    elbos_init = get_elbo(ALPHA_init, PI_init, GAMMA_init, PHI_init, my_data)
+    elbos = [ get_elbo(ALPHA, PI, GAMMA, PHI, my_data) ]
     torch.cuda.empty_cache()
 
-    elbos = []
-    elbos.append(elbos_init)
     print("Got the initial ELBO ^")
     
-    ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_init, PI_init, GAMMA_init, PHI_init, J, K, my_data)
+    ALPHA, PI, GAMMA, PHI = update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, my_data)
     print("Got the first round of updates!")
     
-    elbo_firstup = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, my_data)
-    elbos.append(elbo_firstup)
+    elbos.append( get_elbo(ALPHA, PI, GAMMA, PHI, my_data) )
     
     print("got the first ELBO after updates ^")
     iter = 0
 
     while(elbos[-1] > elbos[-2]) and (iter < num_iterations):
         print("ELBO not converged, re-running CAVI iteration # " + str(iter+1))
-        ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi = update_variational_parameters(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, J, K, my_data)
-        elbo = get_elbo(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, my_data)
+        ALPHA, PI, GAMMA, PHI = update_variational_parameters(ALPHA, PI, GAMMA, PHI, J, K, my_data)
+        elbo = get_elbo(ALPHA, PI, GAMMA, PHI, my_data)
         elbos.append(elbo)
         iter = iter + 1
     
     print("ELBO converged, CAVI iteration # " + str(iter+1) + " complete")
-    return(ALPHA_vi, PI_vi, GAMMA_vi, PHI_vi, elbos)
+    return(ALPHA, PI, GAMMA, PHI, elbos)
 
 # %%
 @dataclass
@@ -371,25 +330,47 @@ class IndexCountTensor():
     cell_index: torch.Tensor
     y_count: torch.Tensor
     t_count: torch.Tensor
-
+    cells_lookup: torch.Tensor # sparse cells x M matrix mapping of cells to (cell,junction) pairs
+    ycount_lookup: torch.Tensor
+    tcount_lookup: torch.Tensor 
+        
 # %%
 # put this into main code blow after 
-input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5'
-#input_file=args.input_file
-final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(input_file)
+if False: 
+    input_file = '/gpfs/commons/groups/knowles_lab/Karin/parse-pbmc-leafcutter/leafcutter/junctions/PBMC_input_for_LDA.h5'
+    #input_file=args.input_file
+    final_data, coo_counts_sparse, coo_cluster_sparse, cell_ids_conversion, junction_ids_conversion = load_cluster_data(
+        input_file) # , celltypes = ["B", "MemoryCD4T"])
+    # 
 
-# global variables
+    # global variables
+    N = coo_cluster_sparse.shape[0]
+    J = coo_cluster_sparse.shape[1]
 
-N = coo_cluster_sparse.shape[0]
-J = coo_cluster_sparse.shape[1]
-K = 3 # should also be an argument that gets fed in
+    # initiate instance of data class containing junction and cluster indices for non-zero clusters 
+    junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64, device=device)
+    cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64, device=device)
+    
+    # note these are staying on the CPU! 
+    ycount = torch.tensor(final_data.junc_count.values, dtype=DTYPE, device=device) 
+    tcount = torch.tensor(final_data.clustminjunc.values, dtype=DTYPE, device=device)
 
-# initiate instance of data class containing junction and cluster indices for non-zero clusters 
-junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64).to(device)
-cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64).to(device)
-ycount = torch.tensor(final_data.junc_count.values).unsqueeze(-1).to(device)
-tcount = torch.tensor(final_data.clustminjunc.values).unsqueeze(-1).to(device)
-my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount)
+    M = len(cell_index_tensor)
+    cells_lookup = torch.sparse_coo_tensor(
+        torch.stack([cell_index_tensor, torch.arange(M, device=device)]), 
+        torch.ones(M, device=device, dtype=DTYPE)).to_sparse_csr()
+    
+    ycount_lookup = torch.sparse_coo_tensor(
+        torch.stack([junc_index_tensor, torch.arange(M, device=device)]), 
+        ycount).to_sparse_csr()
+    
+    tcount_lookup = torch.sparse_coo_tensor(
+        torch.stack([junc_index_tensor, torch.arange(M, device=device)]), 
+        tcount).to_sparse_csr()
+
+    my_data = IndexCountTensor(junc_index_tensor, cell_index_tensor, ycount, tcount, cells_lookup, ycount_lookup, tcount_lookup)
+
+K = 10 # should also be an argument that gets fed in
 
 # %%
 if __name__ == "__main__":
@@ -407,14 +388,15 @@ if __name__ == "__main__":
         print(K)
 
         ALPHA_f, PI_f, GAMMA_f, PHI_f, elbos_all = calculate_CAVI(J, K, N, my_data, num_iters)
-        elbos_all = torch.FloatTensor(elbos_all).numpy()
+        elbos_all = np.array(elbos_all)
         juncs_probs = ALPHA_f / (ALPHA_f+PI_f)
-        theta_f = distributions.Dirichlet(GAMMA_f).sample()
-        z_f = distributions.Categorical(PHI_f).sample()
+        #theta_f = distributions.Dirichlet(GAMMA_f).sample()
+        # z_f = distributions.Categorical(PHI_f).sample() # this would be pretty big! 
         #make theta_f a dataframe 
+        theta_f = GAMMA_f / GAMMA_f.sum(1,keepdim=True)
         theta_f_plot = pd.DataFrame(theta_f.cpu())
         theta_f_plot['cell_id'] = cell_ids_conversion["cell_type"].to_numpy()
-        theta_f_plot_summ = theta_f_plot.groupby('cell_id').median()
+        theta_f_plot_summ = theta_f_plot.groupby('cell_id').mean()
         print(theta_f_plot_summ)
 
         # plot ELBOs 
@@ -430,7 +412,7 @@ celltypes = theta_f_plot.pop("cell_id")
 lut = dict(zip(celltypes.unique(), ["r", "b", "g", "orange", "purple", "brown", "pink", "gray", "olive", "cyan"]))
 print(lut)
 row_colors = celltypes.map(lut)
-print(sns.clustermap(theta_f_plot, row_colors=row_colors))
+#print(sns.clustermap(theta_f_plot, row_colors=row_colors))
 # %%
 juncs_probs.diff()
 junc_ind=2
