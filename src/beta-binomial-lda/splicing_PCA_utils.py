@@ -20,8 +20,9 @@ def filter_junctions(junc_counts, cluster_counts, min_junc_mean = 0.005, plot = 
         plt.xlabel("log10(mean junction count)")
     
     to_keep = junc_norm_sum > min_junc_mean
-
-    return junc_counts.tocsr()[:,to_keep].tocoo(), cluster_counts.tocsr()[:,to_keep].tocoo()
+    print("also printing original indices of junctions we are keeping")
+    
+    return junc_counts.tocsr()[:,to_keep].tocoo(), cluster_counts.tocsr()[:,to_keep].tocoo(), to_keep
 
 def simulate_junc_counts(cluster_counts, cell_types, psi_prior_shape1 = 0.5, psi_prior_shape2 = 0.5):
     """Simulate junc counts while keeping the cluster counts of observed data. 
