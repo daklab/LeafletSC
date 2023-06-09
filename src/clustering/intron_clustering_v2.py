@@ -7,7 +7,10 @@ import pyranges as pr
 from gtfparse import read_gtf #initially tested with version 1.3.0 
 from tqdm import tqdm
 import gzip
+import torch
 import time 
+from concurrent.futures import ThreadPoolExecutor
+from torch.utils.data import IterableDataset
 
 parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
 
@@ -15,7 +18,7 @@ parser.add_argument('--junc_files', dest='junc_files',
                     help='path that has all junction files along with counts in single cells or bulk samples')
 
 parser.add_argument('--sequencing_type', dest='sequencing_type',
-                    help='were the junction obtained using data from single cell or bulk sequencing? options are "single_cell" or "bulk"')
+                    help='were the junction obtained using data from single cell or bulk sequencing? options are "single_cell" or "bulk". Note if sequencing was done using smart-seq2, then use "bulk" option')
 
 parser.add_argument('--setting', dest='setting', 
                     help='indicate whether analysis should be done in "canonical" mode or "cryptic" where can expect rare events that may be true outlier events')
@@ -195,6 +198,9 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
         all_files = glob.glob(os.path.join(junc_files, "*.wbarcode.junc"))
     elif sequencing_type == "bulk":
         all_files = glob.glob(os.path.join(junc_files, "*.junc"))
+        #if all_files is empty try the same command with *.juncs instead
+        if len(all_files) == 0:
+            all_files = glob.glob(os.path.join(junc_files, "*.juncs"))
 
     # what if have 100s of files here? ... 
     juncs = pd.concat(load_files(all_files, sequencing_type, min_intron, max_intron, min_junc_reads))

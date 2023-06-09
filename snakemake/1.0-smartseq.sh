@@ -45,6 +45,8 @@ elif [ -f "${BAM_DIR}/${R1_FILE}" ]; then
   # Only R1 file exists, move it to the output directory
   mv "${BAM_DIR}/${R1_FILE}" "${output_dir}" #forgot to move the .bai files also so need to remake index files 
   echo "Moved ${R1_FILE} to ${output_dir}"
+  # Also move the index! 
+  mv "${BAM_DIR}/${R1_FILE}.bai" "${output_dir}"
 else
   # Neither R1 nor R2 file exists
   echo "Could not find both ${R1_FILE} and ${R2_FILE} in ${BAM_DIR}"
@@ -55,3 +57,9 @@ fi
 #  echo "Indexing $file"
 #  samtools index $file
 #done
+
+# ah sigh doing this the second time around I moved the original file to the merge folder and
+# so they are no longer in the facs_bam_files folder...
+# the R1 non merged files were already in tissue subdirectories so i moved all those into 
+# merged folder manually 
+
