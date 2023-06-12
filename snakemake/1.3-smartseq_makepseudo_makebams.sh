@@ -6,7 +6,7 @@
 #SBATCH --mem=200G
 #SBATCH -t 6-00:00 # Runtime in D-HH:MM
 #SBATCH -J pseudobulks # <-- name of job
-#SBATCH --array=1-20 # <-- number of jobs to run (number of tissues)
+#SBATCH --array=1-120 # <-- number of jobs to run (number of tissue-cell type pairs)
 
 #load required modules
 module purge                                                                                                                                                                         

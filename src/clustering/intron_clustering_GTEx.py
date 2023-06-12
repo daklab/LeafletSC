@@ -48,7 +48,7 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     gtf_exons_gr = gtf_exons_gr.drop_duplicate_positions(strand=True) #why are so many gone after this? 
     return(gtf_exons_gr)
 
-def main(gtf_file, junc_bed_file, output_file, min_junc_counts=7500):
+def main(gtf_file, junc_bed_file, output_file, min_junc_counts=9000):
     """
     Intersect junction coordinates with up/downstream exons in the canonical setting based on gtf file 
     and then obtain intron clusters using overlapping junctions.
@@ -80,8 +80,13 @@ def main(gtf_file, junc_bed_file, output_file, min_junc_counts=7500):
     #[2] seperate junctions in GTEx files into chr, start, end and strand columns... 
     gtex[['chr', 'start', 'end']] = gtex['Name'].str.split('_', expand=True)   
     gtex['gene_id'] = gtex['Description'].fillna('').str.split('.').str[0] #get rid of version number in gene_id
-    print("------------------" + str(len(gtex.gene_id.unique())) + " unique genes in GTEx junction file------------------")
     
+    # remove junctions with less than min_junc_counts counts
+    # remove junctions before clustering that have very few counts (to reduce noise) for now at least 
+    # those junctions could still be interesting to look at later but right now need to minimize the size of the dataset 
+    gtex = gtex[gtex.Junc_Counts > min_junc_counts]
+    print("------------------" + str(len(gtex.gene_id.unique())) + " unique genes in GTEx junction file------------------")
+
     #[3] need to get strand info using gtf file and merge it with gtex 
     gtex = gtex.merge(gtf_exons_gr.df[["Strand", "gene_id"]], on="gene_id", how="left")
     # if "chr" appears in the chrom column
@@ -90,15 +95,12 @@ def main(gtf_file, junc_bed_file, output_file, min_junc_counts=7500):
         gtex['chr'] = gtex['chr'].map(lambda x: x.lstrip('chr').rstrip('chr'))
     # remove junctions with no strand info 
     gtex = gtex[gtex['Strand'].notnull()]
+    print("------------------" + str(len(gtex.gene_id.unique())) + " unique genes in GTEx junction file after merging with gtf file------------------")
 
     # keep junction_id to map back later 
     gtex['junction_id'] = gtex['chr'] + '_' + gtex['start'].astype(str) + '_' + gtex['end'].astype(str)
     # keep unique entries 
     gtex = gtex.drop_duplicates()
-
-    # remove junctions before clustering that have very few counts (to reduce noise) for now at least 
-    # those junctions could still be interesting to look at later but right now need to minimize the size of the dataset 
-    gtex = gtex[gtex.Junc_Counts > min_junc_counts]
 
     # remove junctions that appear across multiple rows 
     gtex = gtex.drop_duplicates(subset=['junction_id'])
@@ -166,8 +168,11 @@ def main(gtf_file, junc_bed_file, output_file, min_junc_counts=7500):
     #[6]  Get final list of junction coordinates and save to bed file (easy visualization in IGV)
     gtex_gr = clusters[["Chromosome", "Start", "End", "Strand", "junction_id", "Cluster", "gene_name", "gene_id"]]
     gtex_gr = gtex_gr.drop_duplicate_positions()
+
     # keep only the junctions remaining in clusters_df
     gtex_gr = gtex_gr[gtex_gr.junction_id.isin(clusters_df.junction_id)]
+    print("------------------The number of junctions is " + str(len(gtex_gr.junction_id.unique()))) 
+
     print("------------MAKING BED FILE------------------")
     gtex_gr.to_bed(junc_bed_file, chain=True) #add option to add prefix to file name
 
@@ -206,8 +211,9 @@ if __name__ == '__main__':
 
 # to test run 
 #gtf_file=/gpfs/commons/groups/knowles_lab/Karin/genome_files/Homo_sapiens.GRCh38.108.chr.gtf
-#output_file=/gpfs/commons/groups/knowles_lab/Karin/data/GTEx/clustered_junctions
+#gtf_file="/gpfs/commons/groups/knowles_lab/Karin/genome_files/Homo_sapiens.GRCh38.108.chr.gtf"
+#output_file=/gpfs/commons/groups/knowles_lab/Karin/data/GTEx/clustered_junctions_minjunccounts
 #junc_bed_file=/gpfs/commons/groups/knowles_lab/Karin/data/GTEx/clustered_filtered_junctions.bed
-#min_junc_counts=7500
+#min_junc_counts=10000
 
 #python src/clustering/intron_clustering_GTEx.py --gtf_file $gtf_file --output_file $output_file --junc_bed_file $junc_bed_file --min_junc_counts $min_junc_counts

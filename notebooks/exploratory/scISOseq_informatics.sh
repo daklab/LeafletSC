@@ -16,4 +16,8 @@ fas=/gpfs/commons/groups/knowles_lab/Karin/data/isoform_cortex_longread_SC/PCDH_
 #[5.] want to look at exon expression across cell types! 
 
 #[4.] run FeatureCounts (this is in total)
-featureCounts -t exon -g gene_id -a PCDH_gene_clusters_exon_coords.saf -o Run1_PCDH_exons_counts.txt Run1.sorted.chr5.bam -F SAF -L -O -M --verbose -s 1
+featureCounts -t exon -g gene_id -a PCDH_gene_clusters_exon_coords.saf \
+-o Run1_PCDH_exons_counts.txt Run1.sorted.chr5.bam -F SAF -L -O -M --verbose -s 1
+
+# isoquant also does exon with a custom reference file 
+# how to figure which cell type is which cell barcode coming from? 
