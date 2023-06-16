@@ -37,8 +37,10 @@ if [ -f ${output_file} ]; then
 fi
 
 # Merge all the BAM files for the current tissue into a single BAM file
-#samtools merge -f ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam
-samtools merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam
+#samtools merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam
+
+# use sambamba instead of samtools with increased threads and memory
+sambamba merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam
 
 echo "Merged ${TISSUE} BAM files into ${output_file}"
 
@@ -47,3 +49,5 @@ echo "Merged ${TISSUE} BAM files into ${output_file}"
 
 sambamba index ${output_file}
 echo "Indexed ${output_file}"
+
+#sbatch --wrap="sambamba merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam" --mem=500G

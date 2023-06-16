@@ -1,0 +1,1 @@
+/var/spool/slurmd/job36171046/slurm_script: line 4:  5377 Bus error               python src/beta-binomial-lda/GTEx_prepare_input_job.py

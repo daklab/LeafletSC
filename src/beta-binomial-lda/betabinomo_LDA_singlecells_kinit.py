@@ -18,8 +18,6 @@ import argparse
 
 import sklearn.cluster
 
-
-
 # %%    
 #parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
 
@@ -59,28 +57,13 @@ def init_var_params(K, final_data, float_type, init_labels = None, eps = 1e-2):
         GAMMA[torch.arange(N),init_labels] = 2.
         PHI = GAMMA[final_data.cell_index,:] # will get normalized below
     else:
-        GAMMA = 1. + torch.rand(N, K, **float_type) * 0.1
+        #GAMMA = 1. + torch.rand(N, K, **float_type) * 0.1
+        GAMMA = torch.rand(N, K, **float_type) * 20 + 1
         M = len(final_data.junc_index) # number of cell-junction pairs coming from non zero clusters
         #PHI = torch.ones((M, K), dtype=DTYPE).to(device) * 1/K
         PHI = torch.rand(M, K, **float_type)
     
     PHI /= PHI.sum(1, keepdim=True)
-    
-    # Choose random states to be close to 1 and the rest to be close to 0 
-    # By intializing with one value being 100 and the rest being 1 
-    # generate unique random indices for each row
-    #random_indices = torch.randint(K, size=(N, 1)).to(device)
-
-    # create a mask for the random indices
-    #mask = torch.zeros((N, K)).to(device)
-    #mask.scatter_(1, random_indices, 1)
-
-    # set the random indices to 1000
-    #GAMMA = GAMMA * (1 - mask) + 1000 * mask
-
-    # Cell State Assignments, each cell gets a PHI value for each of its junctions
-    # Initialized to 1/K for each junction
-
     
     return ALPHA, PI, GAMMA, PHI
 
@@ -266,6 +249,7 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
         }
 
     ALPHA, PI, GAMMA, PHI = init_var_params(K, my_data, float_type, init_labels = init_labels)
+    #print(GAMMA)
     #torch.cuda.empty_cache()
 
     elbos = [ get_elbo(ALPHA, PI, GAMMA, PHI, my_data, hypers) ]
@@ -278,7 +262,8 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
         ALPHA, PI, GAMMA, PHI = update_variational_parameters(ALPHA, PI, GAMMA, PHI, my_data, hypers)
         elbo = get_elbo(ALPHA, PI, GAMMA, PHI, my_data, hypers)
         elbos.append(elbo)
-        if elbos[-1] < elbos[-2]: break # add tolerance? 
+        # if newest elbo is smaller than previous step by more than 1e-6, break
+        if (elbos[-1] - elbos[-2] < -1e-2): break
     
     print("ELBO converged, CAVI iteration # ", iteration+1, " complete")
     return(ALPHA, PI, GAMMA, PHI, elbos)

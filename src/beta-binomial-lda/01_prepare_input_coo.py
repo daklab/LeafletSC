@@ -36,7 +36,7 @@ def main(intron_clusters, output_file):
 
     print("The number of intron clusters evaluated is " + str(len(clusts.Cluster.unique())))
 
-    summarized_data = clusts[["cell_id", "junction_id", "gene_name", "junc_count", "Cluster", "file_name", "score"]] #the score is the original column from regtools results, indicating total counts for junction across all single cells from that cell type
+    summarized_data = clusts[["cell_id", "junction_id", "gene_id", "junc_count", "Cluster", "file_name", "score"]] #the score is the original column from regtools results, indicating total counts for junction across all single cells from that cell type
     summarized_data["junc_count"] = summarized_data["junc_count"].astype(int)
     
     #need to get total cluster counts for each cell 
