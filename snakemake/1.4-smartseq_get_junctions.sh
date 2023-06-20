@@ -34,7 +34,16 @@ TISSUE=$(echo $TISSUE | awk -F. '{print $1}')
 output_file="${output_dir}/${TISSUE}.juncs"
 output_barcodes="${output_dir}/${TISSUE}.barcodes"
 output_juncswbarcodes="${output_dir}/${TISSUE}.juncswbarcodes"
-echo Extracting junctions!
+echo Checking if junctions exist!
+
+#check if output_juncswbarcodes exists and if so, skip
+if [ -f $output_juncswbarcodes ]; then
+    echo "File $output_juncswbarcodes exists, skipping"
+    exit 0
+fi
+
+# otherwise run regtools if file doesn't exist
+echo Extracting junctions with regtools!
 
 regtools_run=/gpfs/commons/home/kisaev/regtools/build/regtools
 $regtools_run junctions extract -a 6 -m 50 -M 500000 $input_bam -o $output_file -s XS -b $output_barcodes

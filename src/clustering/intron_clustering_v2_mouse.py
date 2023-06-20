@@ -47,13 +47,19 @@ parser.add_argument('--min_junc_reads', dest='min_junc_reads',
 parser.add_argument('--keep_singletons', dest='keep_singletons', 
                     help='Keep "clusters" composed of just one junction. These might represent alternative first or last exon in some cases which may be worthwhile to consider. Default is False')
 
+parser.add_argument('--junc_suffix', dest='junc_suffix',
+                    help='suffix of junction files')
+
+parser.add_argument('--min_num_cells_wjunc', dest='min_num_cells_wjunc',
+                    help='minimum number of cells that have a junction to consider it, default is 5')
+
 args = parser.parse_args()
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #                      Utilities
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-def load_files(filenames, sequencing_type, min_intron=50, max_intron=50000, min_junc_reads=2):
+def load_files(filenames, sequencing_type, min_intron=50, max_intron=50000, min_num_cells_wjunc=5, min_junc_reads=2):
     
     """
     Read in every junction file (ideally associated with a-priori known cell types) and clean up column names 
@@ -82,26 +88,33 @@ def load_files(filenames, sequencing_type, min_intron=50, max_intron=50000, min_
             col_names.append("cell_readcounts")
         juncs = juncs.set_axis(col_names, axis=1, copy=False)
         
+        print("finished reading the junction file" + filename)
+
         #add and subtract block values
         juncs[['block_add_start','block_subtract_end']] = juncs["blockSizes"].str.split(',', expand=True)
         juncs["chromStart"] = juncs["chromStart"] + juncs['block_add_start'].astype(int)
         juncs["chromEnd"] = juncs["chromEnd"] - juncs['block_subtract_end'].astype(int)
+        print("finished adding and subtracting block values")
 
         #get the length of the intron between two exons that make up the junction 
         juncs["intron_length"] = juncs["chromEnd"] - juncs["chromStart"]
+        print("finished calculating intron length")
 
         #remove introns longer than 50kb for now (these should be a parameter that can be changed by user)
         juncs = juncs[juncs.intron_length < int(max_intron)]
         juncs = juncs[juncs.intron_length > int(min_intron)]
+        print("finished removing introns that are too long or too short")
 
         #remove junctions that only got less than 5 (default) cells mapping to it 
         if sequencing_type == "single_cell":
             juncs['split_up'] = juncs["cell_readcounts"].str.split(',')
             juncs=juncs.drop(["cell_readcounts"], axis=1)
-            juncs = juncs[juncs.num_cells_wjunc >= 10] # junction has at least one read count in at least five different cells (should also be changeable parameter)
+            juncs = juncs[juncs.num_cells_wjunc >= int(min_num_cells_wjunc)] # junction has at least one read count in at least x different cells 
+        print("finished removing junctions that only got less than min number of cells mapping to it")
         
         #remove junctions that have less than "min_junc_reads" total read counts covering it 
         juncs = juncs[juncs["score"] >= int(min_junc_reads)] 
+        print("finished removing junctions that only got less than min number of reads mapping to it")
         
         #extract name of cells 
         filename = filename.split("/")[-1]
@@ -181,25 +194,24 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     gtf_exons_gr = gtf_exons_gr.drop_duplicate_positions(strand=True) #why are so many gone after this? 
     return(gtf_exons_gr)
 
-def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton):
+def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, junc_suffix, min_num_cells_wjunc):
     """
     Intersect junction coordinates with up/downstream exons in the canonical setting based on gtf file 
     and then obtain intron clusters using overlapping junctions.
     """
 
-    print(singleton)
-
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #        Run analysis and obtain intron clusters
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-    #[1] load gtf coordinates into pyranges object
-    gtf_exons_gr = process_gtf(gtf_file)
-    print("done extracting exons from gtf file")
+    #[1] load gtf coordinates into pyranges object only if canonical setting is used
+    if setting == "canonical":
+        gtf_exons_gr = process_gtf(gtf_file)
+        print("done extracting exons from gtf file")
 
     #[2] collect all junctions across all cell types 
     if sequencing_type == "single_cell":
-        all_files = glob.glob(os.path.join(junc_files, "*.juncswbarcodes")) #this suffix should be user defined in case they used something else when running Regtools 
+        all_files = glob.glob(os.path.join(junc_files, junc_suffix)) #this suffix should be user defined in case they used something else when running Regtools 
     elif sequencing_type == "bulk":
         all_files = glob.glob(os.path.join(junc_files, "*.junc"))
         #if all_files is empty try the same command with *.juncs instead
@@ -207,8 +219,8 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
             all_files = glob.glob(os.path.join(junc_files, "*.juncs"))
 
     # what if have 100s of files here? ... 
-    juncs = pd.concat(load_files(all_files, sequencing_type, min_intron, max_intron, min_junc_reads))
-    print("done extracting junctions")
+    juncs = pd.concat(load_files(all_files, sequencing_type, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads))
+    print("Done extracting junctions!")
 
     # keep only standard chromosomes
     # if "chr" appears in the chrom column 
@@ -230,37 +242,49 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
     #[3] annotate each junction with nearbygenes 
     juncs_gr.Start = juncs_gr.Start.astype("int64")
     juncs_gr.End = juncs_gr.End.astype("int64")
-    juncs_gr = juncs_gr.k_nearest(gtf_exons_gr, strandedness = "same", ties="different", k=2, overlap=False)
 
-    #ensure distance parameter is still 1 
-    juncs_gr = juncs_gr[abs(juncs_gr.Distance) == 1]
+    if setting == "canonical":
+        print("Annotating junctions with known exons based on input gtf file")
+        juncs_gr = juncs_gr.k_nearest(gtf_exons_gr, strandedness = "same", ties="different", k=2, overlap=False)
+        #ensure distance parameter is still 1 
+        juncs_gr = juncs_gr[abs(juncs_gr.Distance) == 1]
+        #for each junction, the start of the junction should equal end of exons and end of junction should equal start of exon 
+        juncs_gr = juncs_gr[(juncs_gr.Start.isin(juncs_gr.End_b)) & (juncs_gr.End.isin(juncs_gr.Start_b))]
+        juncs_gr = juncs_gr[juncs_gr.Start == juncs_gr.End_b]
+        print("The number of junctions after assessing distance to exons is " + str(len(juncs_gr.junction_id.unique()))) 
+        if len(juncs_gr.junction_id.unique()) < 5000:
+            print("There are less than 5000 junctions after assessing distance to exons. Please check your gtf file and ensure that it is in the correct format (start and end positions are not off by 1).")
+        print("Clustering intron splicing events by gene_id")
+        juncs_coords_unique = juncs_gr[['Chromosome', 'Start', 'End', 'Strand', 'junction_id', 'gene_id']].drop_duplicate_positions()
+        clusters = juncs_coords_unique.cluster(by="gene_id", slack=-1, count=True)
 
-    #for each junction, the start of the junction should equal end of exons and end of junction should equal start of exon 
-    juncs_gr = juncs_gr[(juncs_gr.Start.isin(juncs_gr.End_b)) & (juncs_gr.End.isin(juncs_gr.Start_b))]
-    juncs_gr = juncs_gr[juncs_gr.Start == juncs_gr.End_b]
-    print("The number of junctions after assessing distance to exons is " + str(len(juncs_gr.junction_id.unique()))) 
-    if len(juncs_gr.junction_id.unique()) < 5000:
-        print("There are less than 5000 junctions after assessing distance to exons. Please check your gtf file and ensure that it is in the correct format (start and end positions are not off by 1).")
-
-    #[4]  "cluster" introns events by gene  
+    #[4]  "cluster" introns annotation free  
     # Each junction should only be related to two exons (one upstream and one downstream)
     # cluster the introns using just the unique set of junction coordinates 
-    juncs_coords_unique = juncs_gr[['Chromosome', 'Start', 'End', 'Strand', 'junction_id', 'gene_id']].drop_duplicate_positions()
-    clusters = juncs_coords_unique.cluster(by="gene_id", slack=-1, count=True)
-    clusters_df = clusters.df
-
-    #filter intron "clusters" (remove those with only one intron and those with only a single splicing site event (one SS))
-    if(~(singleton)):
-        clusters_wnomultiple_events = clusters_df.groupby(['Cluster'])['Chromosome', 'Start', 'End'].nunique().reset_index()
-        clusters_wnomultiple_events = clusters_wnomultiple_events[(clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.Start) & (clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.End)].Cluster
-        clusters_df = clusters_df[clusters_df['Cluster'].isin(clusters_wnomultiple_events) == False]
-        clusters_list = clusters_df.Cluster.unique() 
+    if setting == "anno_free":
+        print("Clustering intron splicing events via junction coordinates, annotation free!")
+        juncs_coords_unique = juncs_gr[['Chromosome', 'Start', 'End', 'Strand', 'junction_id']].drop_duplicate_positions()
+        clusters = juncs_coords_unique.cluster(slack=-1, count=True)
     
-    print("The number of clusters to be initially evaluated is " + str(len(clusters_list)))
+    #filter intron singleton "clusters" (remove those with only one intron and those with only a single splicing site event (one SS))
+    if((singleton) == False):
+        print("Removing singleton clusters")
+        clusters = clusters[clusters.Count > 1]
+        #clusters_wnomultiple_events = clusters_df.groupby(['Cluster'])['Chromosome', 'Start', 'End'].nunique().reset_index()
+        #clusters_wnomultiple_events = clusters_wnomultiple_events[(clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.Start) & (clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.End)].Cluster
+        #clusters_df = clusters_df[clusters_df['Cluster'].isin(clusters_wnomultiple_events) == False]
+        #clusters_list = clusters_df.Cluster.unique() 
+    
+    print("Removing clusters with more than mean number of junctions")
+    clusters = clusters[clusters.Count < clusters.Count.mean()]
+
+    print("The number of clusters to be initially evaluated is " + str(len(clusters.Cluster.unique())))
+    print("The number of junctions to be initially evaluated is " + str(len(clusters.junction_id.unique())))
+    
+    clusters_df = clusters.df
     juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters_df["junction_id"])]     
     juncs = juncs[juncs.junction_id.isin(clusters_df["junction_id"])]     
-    clusters = clusters[clusters.Cluster.isin(clusters_list)]
-
+    
     #[5]  additional removal of low confidence junctions under canonical setting 
     if setting == "canonical":
         #refine intron clusters based on splice sites found in them -> remove low confidence junctions basically a filter to see which junctions to keep
@@ -297,23 +321,25 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
             clusters_wnomultiple_events=clusters_wnomultiple_events[(clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.Start) & (clusters_wnomultiple_events.Chromosome == clusters_wnomultiple_events.End)].Cluster
             clusters_df = clusters_df[clusters_df['Cluster'].isin(clusters_wnomultiple_events) == False]
             juncs_gr = juncs_gr[juncs_gr.Cluster.isin(clusters_df.Cluster.unique())]
+            # ensure that every junction is only attributed to one gene's intron cluster 
+        assert((clusters_df.groupby(['Cluster'])["gene_id"].nunique().reset_index().gene_id.unique() == 1))
+        clusts_unique = clusters.df[["Cluster", "junction_id", "gene_id", "Count"]].drop_duplicates()
 
-    # ensure that every junction is only attributed to one gene's intron cluster 
-    assert((clusters_df.groupby(['Cluster'])["gene_id"].nunique().reset_index().gene_id.unique() == 1))
+    if setting == "anno_free": #annotation free setting dont need to overlap with exons 
+        clusts_unique = clusters.df[["Cluster", "junction_id", "Count"]].drop_duplicates()
 
-    clusts_unique = clusters.df[["Cluster", "junction_id", "gene_id"]].drop_duplicates()
     # merge juncs_gr with corresponding cluster id
     juncs = juncs.merge(clusts_unique, how="left")
 
     #[6]  Get final list of junction coordinates and save to bed file (easy visualization in IGV)
-    juncs_gr = juncs_gr[["Chromosome", "Start", "End", "Strand", "junction_id", "gene_name", "gene_id"]]
+    juncs_gr = juncs_gr[["Chromosome", "Start", "End", "Strand", "junction_id"]]
     juncs_gr = juncs_gr.drop_duplicate_positions()
     juncs_gr.to_bed(junc_bed_file, chain=True) #add option to add prefix to file name
 
     # summary number of junctions per cluster 
-    summ_clusts_juncs=clusters.df[["Cluster", "junction_id", "gene_id"]].drop_duplicates().groupby(["Cluster", "gene_id"])["junction_id"].count().reset_index()
-    summ_clusts_juncs = summ_clusts_juncs.sort_values("junction_id", ascending=False)
-    print(summ_clusts_juncs.head())
+    #summ_clusts_juncs=clusters.df[["Cluster", "junction_id", "gene_id"]].drop_duplicates().groupby(["Cluster", "gene_id"])["junction_id"].count().reset_index()
+    #summ_clusts_juncs = summ_clusts_juncs.sort_values("junction_id", ascending=False)
+    #print(summ_clusts_juncs.head())
 
     # check if junction doesn't belong to more than 1 cluster 
     juncs_clusts = clusters.df.groupby("junction_id")["Cluster"].count().reset_index()
@@ -324,7 +350,7 @@ def main(junc_files, gtf_file, setting, output, sequencing_type, junc_bed_file, 
     print("These are removed from the final results")
 
     # remove clusters that have junctions that belong to more than one cluster
-    clusters=clusters.df
+    clusters = clusters.df
     clusters = clusters[clusters.Cluster.isin(juncs_clusts[juncs_clusts["Cluster"] > 1].Cluster) == False]
 
     # combine cell junction counts with info on junctions and clusters 
@@ -345,20 +371,40 @@ if __name__ == '__main__':
     min_intron=args.min_intron_length
     max_intron=args.max_intron_length
     min_junc_reads=args.min_junc_reads
+    junc_suffix=args.junc_suffix #'*.juncswbarcodes'
+    min_num_cells_wjunc=args.min_num_cells_wjunc
     # ensure singleton is boolean
     if args.keep_singletons == "True":
         singleton=True
     else:
         singleton=False
-    main(path, gtf_file, setting, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton)
+    # print out all user defined arguments that were chosen 
+    print("The following arguments were chosen:")
+    print("gtf_file: " + gtf_file)
+    print("path: " + path)
+    print("setting: " + setting)
+    print("output_file: " + output_file)
+    print("sequencing_type: " + sequencing_type)
+    print("junc_bed_file: " + junc_bed_file)
+    print("threshold_inc: " + str(threshold_inc))
+    print("min_intron: " + str(min_intron))
+    print("max_intron: " + str(max_intron))
+    print("min_junc_reads: " + str(min_junc_reads))
+    print("junc_suffix: " + junc_suffix)
+    print("min_num_cells_wjunc: " + str(min_num_cells_wjunc))
+    print("singleton: " + str(singleton))
+
+    main(path, gtf_file, setting, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, junc_suffix, min_num_cells_wjunc)
 
 # to test run 
 #gtf_file="/gpfs/commons/groups/knowles_lab/data/tabula_muris/reference-genome/gencode.vM19/genes/genes.gtf"
 #junc_files="/gpfs/commons/scratch/kisaev/ss_tabulamuris_test"
-#output_file="/gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/clustered_junctions.txt" 
-#setting="cryptic"
+#output_file="/gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/clustered_junctions_noanno.txt" 
+#setting="anno_free"
 #sequencing_type="single_cell"
-#singleton="True"
+#singleton="False"
 #junc_bed_file="/gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/clustered_junctions.bed"
 #min_junc_reads=10
-#python src/clustering/intron_clustering_v2_mouse.py --gtf_file $gtf_file --junc_files $junc_files --output_file $output_file --setting $setting --sequencing_type $sequencing_type --min_intron=50 --max_intron=500000 --min_junc_reads=$min_junc_reads --threshold_inc=0.1 --junc_bed_file $junc_bed_file --keep_singletons "True"
+#min_num_cells_wjunc=5
+#junc_suffix="*.juncswbarcodes"
+#python src/clustering/intron_clustering_v2_mouse.py --gtf_file $gtf_file --junc_files $junc_files --output_file $output_file --setting $setting --sequencing_type $sequencing_type --min_intron=50 --max_intron=500000 --min_junc_reads=$min_junc_reads --threshold_inc=0.1 --junc_bed_file $junc_bed_file --keep_singletons $singleton --junc_suffix $junc_suffix --min_num_cells_wjunc=$min_num_cells_wjunc

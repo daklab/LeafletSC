@@ -256,7 +256,7 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
     #torch.cuda.empty_cache()
 
     print("Got the initial ELBO")
-    
+    print("Total number of CAVI iterations is ", num_iterations)
     for iteration in range(num_iterations):
         print("ELBO", elbos[-1],  "CAVI iteration # ", iteration+1, end = "\r")
         ALPHA, PI, GAMMA, PHI = update_variational_parameters(ALPHA, PI, GAMMA, PHI, my_data, hypers)
