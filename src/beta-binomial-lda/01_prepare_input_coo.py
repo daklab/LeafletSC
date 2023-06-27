@@ -36,6 +36,7 @@ def main(intron_clusters, output_file, has_genes):
     clusts = clusts.reset_index(drop=True)
 
     print("The number of intron clusters evaluated is " + str(len(clusts.Cluster.unique())))
+    print("The number of junctions evaluated is " + str(len(clusts.junction_id.unique())))
     
     if(has_genes=="yes"):
         print("A gtf file was used to generate intron clusters")
@@ -81,3 +82,7 @@ if __name__ == '__main__':
     output_file=args.output_file
     has_genes=args.has_genes
     main(intron_clusters, output_file, has_genes)
+
+
+# to run 
+#python /gpfs/commons/home/kisaev/leafcutter-sc/src/beta-binomial-lda/01_prepare_input_coo.py --intron_clusters clustered_junctions_noanno.txt.gz --output_file brain_mouse_cells_noanno --has_genes "no"
