@@ -1,12 +1,12 @@
 #!/bin/sh
 #
 #SBATCH -N 1 # Ensure that all cores are on one machine
-#SBATCH -p pe2
-#SBATCH -c 8
-#SBATCH --mem=200G
-#SBATCH -t 6-00:00 # Runtime in D-HH:MM
+#SBATCH -p bigmem
+#SBATCH -c 2
+#SBATCH --mem=1000G
+#SBATCH -t 2-10:00 # Runtime in D-HH:MM
 #SBATCH -J pseudobulks # <-- name of job
-#SBATCH --array=1-120 # <-- number of jobs to run (number of tissue-cell type pairs)
+#SBATCH --array=1 # <-- number of jobs to run (number of tissue-cell type pairs)
 
 #load required modules
 module purge                                                                                                                                                                         
@@ -19,7 +19,10 @@ input_dir="/gpfs/commons/groups/knowles_lab/data/tabula_muris/smart_seq/tissues"
 cd $input_dir
 
 # Get a list of all the unique tissues that we have 
-TISSUE_LIST=($(ls -d */ | awk -F/ '{print $1}'))
+#TISSUE_LIST=($(ls -d */ | awk -F/ '{print $1}'))
+
+# just need a list of two Brain_Non-Myeloid_oligodendrocyte and Brain_Myeloid_microglial_cell
+TISSUE_LIST=(Brain_Myeloid_microglial_cell)
 
 # Get the current tissue for the SAMPLE ID
 TISSUE=${TISSUE_LIST[$SLURM_ARRAY_TASK_ID - 1]}
@@ -50,4 +53,5 @@ echo "Merged ${TISSUE} BAM files into ${output_file}"
 sambamba index ${output_file}
 echo "Indexed ${output_file}"
 
-#sbatch --wrap="sambamba merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam" --mem=500G
+#sbatch --wrap="sambamba merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam" --mem=600G
+

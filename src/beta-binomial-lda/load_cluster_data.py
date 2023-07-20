@@ -5,7 +5,7 @@ from scipy.sparse import coo_matrix
 
 # load data 
 
-def load_cluster_data(input_file, celltypes = None):
+def load_cluster_data(input_file, celltypes = None, num_cells_sample = None):
 
    # read in hdf file 
     summarized_data = pd.read_hdf(input_file, 'df')
@@ -13,6 +13,9 @@ def load_cluster_data(input_file, celltypes = None):
     #if want to look at only specific subset of cell types 
     if celltypes:
         summarized_data = summarized_data[summarized_data["cell_type"].isin(celltypes)]
+
+    if num_cells_sample:
+        summarized_data = summarized_data.sample(n=num_cells_sample)
     print(summarized_data.cell_type.unique())
     print(len(summarized_data.cell_id.unique()))
 
