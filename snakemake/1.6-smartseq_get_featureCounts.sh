@@ -14,7 +14,7 @@ module load gcc/9.2.0
 module load subread
 
 cd /gpfs/commons/groups/knowles_lab/data/tabula_muris/smart_seq/tissues
-gtf_file=/gpfs/commons/groups/knowles_lab/data/tabula_muris/reference-genome/gencode.vM19/genes/genes.gtf
+gtf_file=/gpfs/commons/groups/knowles_lab/data/tabula_muris/reference-genome/MM10-PLUS/genes/genes.gtf
 
 # Get a list of all the unique tissues that we have 
 TISSUE_LIST=($(ls -d */ | awk -F/ '{print $1}'))

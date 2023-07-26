@@ -85,4 +85,6 @@ if __name__ == '__main__':
 
 
 # to run 
-#python /gpfs/commons/home/kisaev/leafcutter-sc/src/beta-binomial-lda/01_prepare_input_coo.py --intron_clusters /gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/clustered_junctions_noanno.txt_anno_free_50_500000_10_5_0.1_single_cell.gz --output_file /gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/clustered_junctions_noanno.txt_anno_free_50_500000_10_5_0.1_single_cell --has_genes "no"
+#cluster_file="/gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/clustered_junctions_noanno_anno_free_50_100000_10_5_0.1_single_cell.gz"
+#cd Leaflet
+#python src/beta-binomial-lda/01_prepare_input_coo.py --intron_clusters $cluster_file --output_file "/gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/BBmixture_mm10ss2_input" --has_genes "no"

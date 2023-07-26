@@ -4,7 +4,7 @@
 #SBATCH -p bigmem
 #SBATCH -c 2
 #SBATCH --mem=1000G
-#SBATCH -t 2-10:00 # Runtime in D-HH:MM
+#SBATCH -t 5-10:00 # Runtime in D-HH:MM
 #SBATCH -J pseudobulks # <-- name of job
 #SBATCH --array=1 # <-- number of jobs to run (number of tissue-cell type pairs)
 
@@ -43,15 +43,35 @@ fi
 #samtools merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam
 
 # use sambamba instead of samtools with increased threads and memory
-sambamba merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam
+# only combine 500 BAM files a time insude the tissue directory
+# if tissue is Brain_Myeloid_microglial_cell make multiple pseudobulks 
 
-echo "Merged ${TISSUE} BAM files into ${output_file}"
+#if $TISSUE == "Brain_Myeloid_microglial_cell"; then
+# Use 'find' to get a list of all the sorted CB BAM files for the specified tissue
+
+# Use 'find' to get a list of all the sorted CB BAM files for the specified tissue
+find "${input_dir}/${TISSUE}" -maxdepth 1 -type f -name '*.sorted.CB.bam' | xargs -n 128 bash -c 'batch_output="batch_$$.bam"; sambamba merge "${batch_output}" "$@"; echo "Merged files: $@"' bash   
+
+# just print out file names 
+#find "${input_dir}/${TISSUE}" -maxdepth 1 -type f -name '*.sorted.CB.bam' | xargs -n 128 bash -c 'batch_output="batch_$$.bam"; echo "Merged files: $@"' bash   
+
+# move the batch_*.bam files to the pseudobulk directory (these files will be run through regtools)
+
+# for every BAM file in the tissues directory that starts wtih batch, index it 
+#for bam_file in ${input_dir}/batch_*.bam; do
+#    echo $bam_file
+#    sambamba index $bam_file
+#done
+
+# i think sambamba automatically generates an index file
+
+#sambamba merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam
+
+#echo "Merged ${TISSUE} BAM files into ${output_file}"
 
 # Index the new BAM file
 #samtools index ${output_file}
-
-sambamba index ${output_file}
-echo "Indexed ${output_file}"
+#echo "Indexed ${output_file}"
 
 #sbatch --wrap="sambamba merge ${output_file} ${input_dir}/${TISSUE}/*.sorted.CB.bam" --mem=600G
 
