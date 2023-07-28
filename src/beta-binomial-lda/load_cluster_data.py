@@ -2,13 +2,36 @@
 import pandas as pd
 import numpy as np
 from scipy.sparse import coo_matrix
+import os
 
 # load data 
 
-def load_cluster_data(input_file, celltypes = None, num_cells_sample = None):
+def load_cluster_data(input_file=None, input_folder=None, celltypes = None, num_cells_sample = None):
 
    # read in hdf file 
-    summarized_data = pd.read_hdf(input_file, 'df')
+    if input_file:
+        summarized_data = pd.read_hdf(input_file, 'df')
+
+    print("Reading in data from folder ...")
+    
+    if input_folder:
+        print(input_folder)
+        # read each hdf file in folder and concatenate
+        files = os.listdir(input_folder)
+
+        df_list = []
+        for file in files:
+            if file.endswith(".h5"):
+                path_with_quotes = input_folder + file
+                fixed_path = path_with_quotes.replace("'", "")
+                df = pd.read_hdf(fixed_path, 'df')
+                df_list.append(df)
+            else:
+                pass
+
+        # concatenate all dataframes
+    summarized_data = pd.concat(df_list, ignore_index=True)
+    print("Finished reading in data from folder ...")
 
     #if want to look at only specific subset of cell types 
     if celltypes:
@@ -16,8 +39,9 @@ def load_cluster_data(input_file, celltypes = None, num_cells_sample = None):
 
     if num_cells_sample:
         summarized_data = summarized_data.sample(n=num_cells_sample)
-    print(summarized_data.cell_type.unique())
-    print(len(summarized_data.cell_id.unique()))
+   
+    print(summarized_data["cell_type"].unique())
+    print(len(summarized_data["cell_id"].unique()))
 
     summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
     print(len(summarized_data.cell_id_index.unique()))
