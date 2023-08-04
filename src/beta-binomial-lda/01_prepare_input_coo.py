@@ -54,7 +54,7 @@ def main(intron_clusters, output_file, has_genes, chunk_size):
             clusts_list.append(executor.submit(process_chunk, chunk))
 
     clusts = pd.concat([future.result() for future in clusts_list])
-    clusts["cell_id"] = clusts.cell
+    clusts["cell_id"] = clusts.cell + "_" + clusts.cell_type
     clusts = clusts.drop(['cell'], axis=1)
 
     print("The number of intron clusters evaluated is " + str(len(clusts.Cluster.unique())))
@@ -62,7 +62,7 @@ def main(intron_clusters, output_file, has_genes, chunk_size):
 
     if(has_genes=="yes"):
         print("A gtf file was used to generate intron clusters")
-        summarized_data = clusts[["cell_id", "junction_id", "gene_id", "junc_count", "Cluster", "file_name"]] 
+        summarized_data = clusts[["cell_id", "junction_id", "gene_id", "junc_count", "Cluster", "cell_type"]] 
     if(has_genes=="no"):
         print("No gtf file was used to generate intron clusters")
         summarized_data = clusts[["cell_id", "junction_id", "junc_count", "Cluster", "cell_type"]]
@@ -80,6 +80,8 @@ def main(intron_clusters, output_file, has_genes, chunk_size):
     print("The number of total cells evaluated is " + str(len(all_cells))) 
 
     cells_types = clusts[["cell_type", "cell_id"]].drop_duplicates()
+    print(clusts.head())
+    print("The number of cells per cell type is:")
     print(cells_types.groupby(["cell_type"])["cell_type"].count())
  
     print("Ensuring that each cell-junction pair appears only once")
@@ -87,7 +89,7 @@ def main(intron_clusters, output_file, has_genes, chunk_size):
 
     print("Merge cluster counts with summarized data")
     summarized_data = clust_cell_counts.merge(summarized_data)
-    print("DOne merging cluster counts with summarized data")
+    print("Done merging cluster counts with summarized data")
 
     #save file and use as input for LDA script 
     summarized_data["junc_ratio"] = summarized_data["junc_count"] / summarized_data["Cluster_Counts"]
@@ -99,6 +101,7 @@ def main(intron_clusters, output_file, has_genes, chunk_size):
     # split summarized_data file by cell_type and save each one as a hdf file with output_file + cell type name
     summarized_data_split = summarized_data.groupby('cell_type')
     for name, group in summarized_data_split:
+        print("saving " + name + " as hdf file")
         group.to_hdf(output_file + "_" + name + ".h5", key='df', mode='w', complevel=9, complib='zlib')
 
     print("Done generating input file for beta-binomial LDA model. This process took " + str(round(time.time() - start_time)) + " seconds")

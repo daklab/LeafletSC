@@ -69,12 +69,16 @@ def make_Y(junc_counts, cluster_counts, float_type, rho = 0.1):
     psi.data /= cluster_counts.data
     
     w = junc_counts.copy() # observation weights = inverse variances
+    # weight matrix 'w' is a sparse matrix calculated using the beta-binomial variance model 
+    # it represents the inverse variances (observation weights) for each PSI value 
+    # rho is overdispersion parameter for beta binomial. When rho is 0, variance reduces to the binomial variance (1/p) 
+    # when rho is 1, variance is maximally overdispersed 
     w.data = cluster_counts.data / (1. + (cluster_counts.data - 1) * rho) # beta binomial variance, kinda
     
     # calculate mean junction usage ratios
     w_psi = w.copy() 
     w_psi.data *= psi.data
-    junc_means = sparse_sum(w_psi, 0) / sparse_sum(w, 0)
+    junc_means = sparse_sum(w_psi, 0) / sparse_sum(w, 0) 
     
     # center Y
     Y_data = psi.data - junc_means[psi.col]

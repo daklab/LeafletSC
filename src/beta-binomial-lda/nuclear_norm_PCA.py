@@ -60,7 +60,13 @@ def nuc_norm_PCA(
 ):
     """Fit nuclear norm regularized matrix completion, very close in spirit to PCA. 
     
-    There are two levels of convergence to consider. Firstly, the outer loop (the Franke-Wolfe) optimization stops when either `its` iterations have been completed or the RMSE changes by <rmseTol. Secondly, the inner loop (power iteration (PI) to get an approximate rank-1 SVD) is controlled by `power_iteration_controller`. power_iteration_controller can be a function, in which case it takes one parameter (the current iteration number) and returns a tuple of pi_its (the maximum number of iterations the PI is allowed) and tol (PI stops if the last two estimates of the top SV are within tol of each other). According to the theory, one should use something like `power_iteration_controller = lambda it: (it+2, 0.)` or `lambda it: (100, max( 1e-1/(it+1)**2, 1e-6 ) )` but in practice time/accuracy trade-off seems best with fixed `pi_its` or `tol`. Possibly this is because our analytic calculation of the stepSize makes up for inaccuracy in the SVD. 
+    There are two levels of convergence to consider. Firstly, the outer loop (the Franke-Wolfe) optimization stops when either `its` 
+    iterations have been completed or the RMSE changes by <rmseTol. Secondly, the inner loop (power iteration (PI) to get an approximate 
+    rank-1 SVD) is controlled by `power_iteration_controller`. power_iteration_controller can be a function, in which case it takes one 
+    parameter (the current iteration number) and returns a tuple of pi_its (the maximum number of iterations the PI is allowed) and 
+    tol (PI stops if the last two estimates of the top SV are within tol of each other). According to the theory, one should use something 
+    like `power_iteration_controller = lambda it: (it+2, 0.)` or `lambda it: (100, max( 1e-1/(it+1)**2, 1e-6 ) )` but in practice time/accuracy 
+    trade-off seems best with fixed `pi_its` or `tol`. Possibly this is because our analytic calculation of the stepSize makes up for inaccuracy in the SVD. 
     """
 
     if X is None: X = torch.zeros_like(Y) 

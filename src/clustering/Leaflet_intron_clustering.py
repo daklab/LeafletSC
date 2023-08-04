@@ -12,6 +12,7 @@ import concurrent.futures
 import warnings
 import sys
 import builtins
+import concurrent.futures
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="pyranges")
 
@@ -100,12 +101,16 @@ def read_file(filename, sequencing_type, col_names, junc_suff, min_intron, max_i
             cell_type = filename.split(".batch")[0]
         elif 'pseudobulk' in filename:
             cell_type = filename.split("_pseudobulk")[0]
+        else:
+            cell_type = filename+'_cell'
     elif sequencing_type == "bulk":
         cell_type = filename.split('.junc')[0]
 
+    print(cell_type)
     juncs['cell_type'] = cell_type
     mask = juncs["score"] >= min_junc_reads
     juncs = juncs[mask]
+    print(juncs.head())
     return juncs
 
 
@@ -119,6 +124,7 @@ def load_files(filenames, sequencing_type, junc_suffix, min_intron, max_intron, 
     min_num_cells_wjunc = int(min_num_cells_wjunc)
     min_junc_reads = int(min_junc_reads)
     
+    print(sequencing_type, junc_suff, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads)
     # Use set for faster membership check
     col_names = ["chrom", "chromStart", "chromEnd", "name", "score", "strand", "thickStart", "thickEnd", "itemRgb", "blockCount", "blockSizes", "blockStarts"]
     if sequencing_type == "single_cell":
@@ -129,9 +135,15 @@ def load_files(filenames, sequencing_type, junc_suffix, min_intron, max_intron, 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         results = list(executor.map(lambda x: read_file(x, sequencing_type, col_names, junc_suff, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads), filenames))
 
-    juncs = pd.concat(results)
+    #results = []
+    #for filename in filenames:
+    #    result = read_file(filename, sequencing_type, col_names, junc_suff, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads)
+    #    results.append(result)
+
+    print("Concatenating all the junctions")
+    all_juncs = pd.concat(results)
     print("Reading all the junctions took " + str(round((time.time()-start_time), 2)) + " seconds")
-    return juncs
+    return all_juncs
 
 def refine_clusters(clusters, clusters_df, dataset, threshold_inc=0.01): #need to improve the speed of this 
     
@@ -251,7 +263,7 @@ def main(junc_files, gtf_file, setting, output_file, sequencing_type, junc_bed_f
             all_files = glob.glob(os.path.join(junc_files, "*.juncs"))
 
     print("The number of regtools junction files to be processed is " + str(len(all_files)), flush=True)
-    
+    print(all_files)
     # concat all junction files by reading them in parallel first 
     juncs = load_files(all_files, sequencing_type, junc_suffix, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads)
     print("Done extracting junctions!", flush=True)
@@ -418,8 +430,10 @@ def main(junc_files, gtf_file, setting, output_file, sequencing_type, junc_bed_f
 
 if __name__ == '__main__':
 
-     # create log file to store everything that gets printed to the console
-    log_file = open("Leaflet_log_file.log", 'a')
+    # create log file to store everything that gets printed to the console add date and time to the log_file name 
+    import datetime
+    log_file_name = "Leaflet_log_file_" + str(datetime.datetime.now()) + ".log" 
+    log_file = open(log_file_name, 'a')
 
     gtf_file=args.gtf_file
     path=args.junc_files
