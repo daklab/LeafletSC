@@ -16,7 +16,7 @@ import seaborn as sns
 import os 
 import argparse
 from scipy.stats import binom
-
+from tqdm import tqdm
 import sklearn.cluster
 
 # %%    
@@ -259,7 +259,7 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
 
 # %% 
 
-def calculate_predictive_lik(theta, juncs, clusts, junc_props):
+def calculate_predictive_lik(theta, juncs_probs, val_data):
     
     """
     Calculate the predictive log likelihood.
@@ -274,25 +274,29 @@ def calculate_predictive_lik(theta, juncs, clusts, junc_props):
         float: Total predictive log likelihood.
     """
     
-    N, K = juncs.shape  # Number of c_j pairs and components
+    N = len(val_data.cell_id_index.unique())
+    K = theta.shape[0]
     total_log_likelihood = 0.0
-    
-    for i in range(N):
-        current_sum = 0.0
-        # don't need for loop over K since dataset going in is already K x J for just one K 
-        for k in range(K):
-            y_cj = juncs[i, k]
-            n_cj = clusts[i, k]
-            psi_jk = junc_props[i, k]
-            
-            binomial_likelihood = binom.pmf(y_cj, n_cj, psi_jk)
-            current_sum += theta[k] * binomial_likelihood
-        
-        total_log_likelihood += np.log(current_sum)
+    print("Calculating Predictive Log Likelihood using validation dataset")
+    for k in range(K):
+        for i in tqdm(range(N)):
+            # num junctions that are not zero
+            cell_dat = val_data[val_data.cell_id_index == i]
+            J = cell_dat.junction_id_index.unique()
+            for j in tqdm(J):
+                current_sum = 0.0
+                y_cj = cell_dat[cell_dat.junction_id_index == j].junc_count.values[0]
+                n_cj = cell_dat[cell_dat.junction_id_index == j].cluster_count.values[0]
+                psi_jk = juncs_probs[j, k]
+
+                binomial_likelihood = binom.pmf(y_cj, n_cj, psi_jk)
+                current_sum += theta[k] * binomial_likelihood
+                total_log_likelihood += np.log(current_sum)
 
     print("Predictive Log Likelihood:", str(total_log_likelihood), "with K =", str(K), " cell states")
     return total_log_likelihood
 
+# Functions for differential splicing analysis 
 def log_beta(a, b):
     return torch.lgamma(a) + torch.lgamma(b) - torch.lgamma(a + b)
 
