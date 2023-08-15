@@ -21,6 +21,9 @@ parser.add_argument('--has_genes', dest='has_genes',
                     help='Yes if intron clustering was done with a gtf file, No if intron clustering was done in an annotation free manner')
 parser.add_argument('--chunk_size', dest='chunk_size', default=5000,
                     help='how many lines to read in at a time, default is 5000')
+parser.add_argument('--train_val_test', dest='train_val_test', 
+                    default=None,
+                    help='If "yes", cells will be split into train, validation and test sets')
 args = parser.parse_args()
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -35,9 +38,9 @@ def process_chunk(chunk):
     chunk = chunk.drop(['cell_readcounts'], axis=1)
     return chunk
 
-def main(intron_clusters, output_file, has_genes, chunk_size):
+def main(intron_clusters, output_file, has_genes, chunk_size, train_val_test):
     """ 
-    Create a COO sparse matrix that we can just feed in later to our 
+    Create a sparse matrix that we can just feed in later to our 
     beta-binomial LDA model 
     """
 
@@ -54,6 +57,8 @@ def main(intron_clusters, output_file, has_genes, chunk_size):
             clusts_list.append(executor.submit(process_chunk, chunk))
 
     clusts = pd.concat([future.result() for future in clusts_list])
+    
+    # Necessary to do this because it's possible (though rare) that cells get same ID especially in SS2 data
     clusts["cell_id"] = clusts.cell + "_" + clusts.cell_type
     clusts = clusts.drop(['cell'], axis=1)
 
@@ -75,7 +80,7 @@ def main(intron_clusters, output_file, has_genes, chunk_size):
     clust_cell_counts.columns = ['cell_id', 'Cluster', 'Cluster_Counts']
 
     all_cells = clusts.cell_id.unique()  
-    all_cells=pd.Series(all_cells) 
+    all_cells = pd.Series(all_cells) 
 
     print("The number of total cells evaluated is " + str(len(all_cells))) 
 
@@ -91,18 +96,78 @@ def main(intron_clusters, output_file, has_genes, chunk_size):
     summarized_data = clust_cell_counts.merge(summarized_data)
     print("Done merging cluster counts with summarized data")
 
-    #save file and use as input for LDA script 
+    cells = np.unique(summarized_data['cell_id'].values)
     summarized_data["junc_ratio"] = summarized_data["junc_count"] / summarized_data["Cluster_Counts"]
-    summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
-    summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
 
-    print("Done making the input file for beta-binomial mixture model, now saving splitting it up by cell type and saving as hdf file")
+    # seperate summarized_data into train, validation and test sets 
+    if train_val_test == "yes":
+        print("Splitting data into train, validation and test sets")
+        total_samples = len(cells)
+        train_size = int(0.7 * total_samples)
+        val_size = int(0.2 * total_samples)
 
-    # split summarized_data file by cell_type and save each one as a hdf file with output_file + cell type name
-    summarized_data_split = summarized_data.groupby('cell_type')
-    for name, group in summarized_data_split:
-        print("saving " + name + " as hdf file")
-        group.to_hdf(output_file + "_" + name + ".h5", key='df', mode='w', complevel=9, complib='zlib')
+        # Shuffle the data
+        np.random.seed(42)
+        np.random.shuffle(cells)
+
+        # Split the data into train, validation, and test sets
+        train_data = cells[:train_size]
+        val_data = cells[train_size:train_size + val_size]
+        test_data = cells[train_size + val_size:]
+
+        summarized_data_train = summarized_data[summarized_data['cell_id'].isin(train_data)]
+        summarized_data_val = summarized_data[summarized_data['cell_id'].isin(val_data)]
+        summarized_data_test = summarized_data[summarized_data['cell_id'].isin(test_data)]
+        print("The number of unique cells in training set is " + str(len(summarized_data_train.cell_id.unique())))
+        
+        # within each data set, cells will be indexed from 0 to n-1
+        summarized_data_train['cell_id_index'] = summarized_data_train.groupby('cell_id').ngroup()
+        summarized_data_val['cell_id_index'] = summarized_data_val.groupby('cell_id').ngroup()
+        summarized_data_test['summarized_data_test'] = summarized_data_test.groupby('cell_id').ngroup()
+
+        # keep only junctions observed in both training and validation sets
+        summarized_data_train = summarized_data_train[summarized_data_train['junction_id'].isin(summarized_data_val['junction_id'])]
+        summarized_data_val = summarized_data_val[summarized_data_val['junction_id'].isin(summarized_data_train['junction_id'])]
+        print("The number of unique junctions in training set is " + str(len(summarized_data_train.junction_id.unique())))
+        print("The number of unique junctions in validation set is " + str(len(summarized_data_val.junction_id.unique())))
+
+        summarized_data_train['junction_id_index'] = summarized_data_train.groupby('junction_id').ngroup()
+        print(summarized_data_train.junction_id_index.max())
+
+        # make sure the junctions in the validation are indexed the same way as in the training set
+        summarized_data_val['junction_id_index'] = summarized_data_val.groupby('junction_id').ngroup()
+        print(summarized_data_val.junction_id_index.max())
+        summarized_data_test['junction_id_index'] = summarized_data_test.groupby('junction_id').ngroup()
+
+        print("Done making the input file for beta-binomial mixture model, now saving splitting it up by cell type and saving as hdf file")
+        # split summarized_data file by cell_type and save each one as a hdf file with output_file + cell type name
+        summarized_data_split = summarized_data_train.groupby('cell_type')
+        for name, group in summarized_data_split:
+            print("saving training data" + name + " as hdf file")
+            group.to_hdf(output_file + "_" + name + "_train.h5", key='df', mode='w', complevel=9, complib='zlib')
+
+        summarized_data_split = summarized_data_val.groupby('cell_type')
+        for name, group in summarized_data_split:
+            print("saving validation data" + name + " as hdf file")
+            group.to_hdf(output_file + "_" + name + "_validation.h5", key='df', mode='w', complevel=9, complib='zlib')
+
+        summarized_data_split = summarized_data_test.groupby('cell_type')
+        for name, group in summarized_data_split:
+            print("saving test data" + name + " as hdf file")
+            group.to_hdf(output_file + "_" + name + "_test.h5", key='df', mode='w', complevel=9, complib='zlib')
+
+    else:
+        print("Not splitting data into train, validation and test sets")
+        #save file and use as input for LDA script 
+        summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
+        summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
+
+        print("Done making the input file for beta-binomial mixture model, now saving splitting it up by cell type and saving as hdf file")
+        # split summarized_data file by cell_type and save each one as a hdf file with output_file + cell type name
+        summarized_data_split = summarized_data.groupby('cell_type')
+        for name, group in summarized_data_split:
+            print("saving " + name + " as hdf file")
+            group.to_hdf(output_file + "_" + name + ".h5", key='df', mode='w', complevel=9, complib='zlib')
 
     print("Done generating input file for beta-binomial LDA model. This process took " + str(round(time.time() - start_time)) + " seconds")
 
@@ -111,16 +176,6 @@ if __name__ == '__main__':
     output_file=args.output_file
     has_genes=args.has_genes
     chunk_size=args.chunk_size
-    main(intron_clusters, output_file, has_genes, chunk_size)
+    train_val_test=args.train_val_test
+    main(intron_clusters, output_file, has_genes, chunk_size, train_val_test)
 
-# to run 
-#cluster_file="/gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/clustered_junctions_noanno_anno_free_100_50000_20_10_0.1_single_cell.gz"
-#output_file="/gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/BBmixture_mm10ss2_input_fulldata"
-
-#for testing
-#cluster_file="/gpfs/commons/home/kisaev/slurm/test_clusters"
-#output_file="/gpfs/commons/scratch/kisaev/ss_tabulamuris_test/Leaflet/BBmixture_mm10ss2_test"
-
-#cd Leaflet
-
-#sbatch --wrap "python /gpfs/commons/home/kisaev/Leaflet/src/beta-binomial-lda/01_prepare_input_coo.py --intron_clusters $cluster_file --output_file $output_file --has_genes "no" --chunk_size 10000" --mem 1024G -p bigmem -J "BBmixture"

@@ -42,13 +42,7 @@ def load_cluster_data(input_file=None, input_folder=None, celltypes = None, num_
    
     print(summarized_data["cell_type"].unique())
     print(len(summarized_data["cell_id"].unique()))
-
-    summarized_data['cell_id_index'] = summarized_data.groupby('cell_id').ngroup()
-    print(len(summarized_data.cell_id_index.unique()))
-
-    print(len(summarized_data.junction_id.unique())) # num unique junctions 
-    summarized_data['junction_id_index'] = summarized_data.groupby('junction_id').ngroup()
-    print(len(summarized_data.junction_id_index.unique())) # num unique junctions 
+    print(summarized_data.junction_id_index.max())
 
     coo = summarized_data[["cell_id_index", "junction_id_index", "junc_count", "Cluster_Counts", "Cluster", "junc_ratio"]]
 

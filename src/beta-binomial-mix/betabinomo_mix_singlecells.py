@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os 
 import argparse
+from scipy.stats import binom
 
 import sklearn.cluster
 
@@ -39,6 +40,7 @@ def init_var_params(K, final_data, float_type, init_labels = None, eps = 1e-2):
     print('Initialize VI params')
     
     (N,J) = final_data.ycount_lookup.shape
+    print("Initializing variational parameters with N =", N, "cells and J =", J, "junctions")
 
     # Cell states distributions , each junction in the FULL list of junctions get a ALPHA and PI parameter for each cell state
     ALPHA = 1. + torch.rand(J, K, **float_type)
@@ -51,28 +53,10 @@ def init_var_params(K, final_data, float_type, init_labels = None, eps = 1e-2):
         PHI = GAMMA[final_data.cell_index,:] # will get normalized below
     else:
         GAMMA = 1. + torch.rand(K, **float_type) 
-        #M = len(final_data.junc_index) # number of cell-junction pairs coming from non zero clusters
-        #PHI = torch.ones((M, K), dtype=DTYPE).to(device) * 1/K
         PHI = torch.rand(N, K, **float_type)
     
     PHI /= PHI.sum(1, keepdim=True)
-    
-    # Choose random states to be close to 1 and the rest to be close to 0 
-    # By intializing with one value being 100 and the rest being 1 
-    # generate unique random indices for each row
-    #random_indices = torch.randint(K, size=(N, 1)).to(device)
 
-    # create a mask for the random indices
-    #mask = torch.zeros((N, K)).to(device)
-    #mask.scatter_(1, random_indices, 1)
-
-    # set the random indices to 1000
-    #GAMMA = GAMMA * (1 - mask) + 1000 * mask
-
-    # Cell State Assignments, each cell gets a PHI value for each of its junctions
-    # Initialized to 1/K for each junction
-
-    
     return ALPHA, PI, GAMMA, PHI
 
 # %%
@@ -273,6 +257,48 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
     print("ELBO converged @",elbos[-1]," CAVI iteration # ", iteration+1, " complete")
     return(ALPHA.cpu(), PI.cpu(), GAMMA.cpu(), PHI.cpu(), elbos) # move results back to CPU to avoid clogging GPU
 
+# %% 
+
+def calculate_predictive_lik(theta, juncs, clusts, junc_props):
+    
+    """
+    Calculate the predictive log likelihood.
+    
+    Parameters:
+        theta: C by K matrix of cell state proportions in each cell 
+        juncs: Matrix of observed number of successes (y_cj) for each c_j pair and component. (junction counts)
+        clusts: Matrix of total number of trials (n_cj) for each c_j pair and component. (cluster counts)
+        junc_props: J by K matrix of probabilities of success (psi_jk) for each junction in each cell state.
+    
+    Returns:
+        float: Total predictive log likelihood.
+    """
+    
+    N, K = juncs.shape  # Number of c_j pairs and components
+    total_log_likelihood = 0.0
+    
+    for i in range(N):
+        current_sum = 0.0
+        # don't need for loop over K since dataset going in is already K x J for just one K 
+        for k in range(K):
+            y_cj = juncs[i, k]
+            n_cj = clusts[i, k]
+            psi_jk = junc_props[i, k]
+            
+            binomial_likelihood = binom.pmf(y_cj, n_cj, psi_jk)
+            current_sum += theta[k] * binomial_likelihood
+        
+        total_log_likelihood += np.log(current_sum)
+
+    print("Predictive Log Likelihood:", str(total_log_likelihood), "with K =", str(K), " cell states")
+    return total_log_likelihood
+
+def log_beta(a, b):
+    return torch.lgamma(a) + torch.lgamma(b) - torch.lgamma(a + b)
+
+def score(a, b):
+    return log_beta(a,b).sum() - log_beta(a.sum(), b.sum())
+
 # %%
 @dataclass
 class IndexCountTensor():
@@ -285,12 +311,16 @@ class IndexCountTensor():
 def make_torch_data(final_data, **float_type):
 
     device = float_type["device"]
-    
+            
+    # note these are staying on the CPU! 
+    print("The number of cells going into training data is:")
+    print(len(final_data.cell_id_index.unique()))
+
     # initiate instance of data class containing junction and cluster indices for non-zero clusters 
     junc_index_tensor = torch.tensor(final_data['junction_id_index'].values, dtype=torch.int64, device=device)
     cell_index_tensor = torch.tensor(final_data['cell_id_index'].values, dtype=torch.int64, device=device)
+    print(len(cell_index_tensor.unique()))
     
-    # note these are staying on the CPU! 
     ycount = torch.tensor(final_data.junc_count.values, **float_type) 
     tcount = torch.tensor(final_data.clustminjunc.values, **float_type)
 
