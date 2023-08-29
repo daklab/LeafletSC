@@ -107,10 +107,7 @@ def E_log_xz(ALPHA, PI, GAMMA, PHI, final_data):
     alpha_pi_digamma = (ALPHA + PI).digamma()
     E_log_beta = ALPHA.digamma() - alpha_pi_digamma # J x K
     E_log_1m_beta = PI.digamma() - alpha_pi_digamma
-    
-    #part2 = final_data.y_count * E_log_beta[junc_index_tensor, :] + final_data.t_count * E_log_1m_beta[junc_index_tensor, :]
-    #part2 *= PHI # this is lower memory use because multiplication is in place
-    
+        
     # confirmed this gives the same answer
     part2 = PHI * (final_data.ycount_lookup @ E_log_beta + final_data.tcount_lookup @ E_log_1m_beta) 
     # ycount_lookup is N (cells) x J(unctions). 
@@ -196,7 +193,7 @@ def update_z_theta(ALPHA, PI, GAMMA, PHI, final_data, hypers):
     PHI /= torch.sum(PHI, dim=1, keepdim=True) # in principle not necessary
     
     # Update GAMMA using the updated PHI
-    GAMMA = hypers["eta"] + PHI.sum(0) # correct dimension to sum over? 
+    GAMMA = hypers["eta"] + PHI.sum(0) 
     
     return(PHI, GAMMA)    
 
@@ -259,42 +256,29 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
 
 # %% 
 
-def calculate_predictive_lik(theta, juncs_probs, val_data):
-    
-    """
-    Calculate the predictive log likelihood.
-    
-    Parameters:
-        theta: C by K matrix of cell state proportions in each cell 
-        juncs: Matrix of observed number of successes (y_cj) for each c_j pair and component. (junction counts)
-        clusts: Matrix of total number of trials (n_cj) for each c_j pair and component. (cluster counts)
-        junc_props: J by K matrix of probabilities of success (psi_jk) for each junction in each cell state.
-    
-    Returns:
-        float: Total predictive log likelihood.
-    """
-    
-    N = len(val_data.cell_id_index.unique())
+def calculate_predictive_lik(theta, val_data):
+
+    print("The number of cells going into validation data is:" + str(len(val_data.cell_id_index.unique())))
     K = theta.shape[0]
-    total_log_likelihood = 0.0
+    final_ll = 0.0
     print("Calculating Predictive Log Likelihood using validation dataset")
+    
+    # Calculate binomial likelihoods for all cell-junction pairs using vectorized operations
+    all_ks=[]
     for k in range(K):
-        for i in tqdm(range(N)):
-            # num junctions that are not zero
-            cell_dat = val_data[val_data.cell_id_index == i]
-            J = cell_dat.junction_id_index.unique()
-            for j in tqdm(J):
-                current_sum = 0.0
-                y_cj = cell_dat[cell_dat.junction_id_index == j].junc_count.values[0]
-                n_cj = cell_dat[cell_dat.junction_id_index == j].cluster_count.values[0]
-                psi_jk = juncs_probs[j, k]
+        #print("Calculating Predictive Log Likelihood for cell state", k)
+        binom_likelihood = binom.pmf(val_data['junc_count'].values, val_data['cluster_count'].values, val_data['state_'+str(k)].values)
+        all_ks.append(np.dot(binom_likelihood, theta[k]))
 
-                binomial_likelihood = binom.pmf(y_cj, n_cj, psi_jk)
-                current_sum += theta[k] * binomial_likelihood
-                total_log_likelihood += np.log(current_sum)
-
-    print("Predictive Log Likelihood:", str(total_log_likelihood), "with K =", str(K), " cell states")
-    return total_log_likelihood
+    tensor_list = [torch.tensor(arr) for arr in all_ks]
+    tensor_stacked= torch.stack(tensor_list)
+    sums_across_k = torch.sum(tensor_stacked, dim=0)
+    # Add a small constant to avoid taking the log of zero or small numbers
+    small_constant = 1e-10  # You can adjust this value as needed
+    log_sums_across_columns = torch.log(sums_across_k + small_constant)
+    final_ll = torch.sum(log_sums_across_columns)
+    print("Predictive Log Likelihood:", final_ll, "with K =", K, " cell states")
+    return final_ll
 
 # Functions for differential splicing analysis 
 def log_beta(a, b):
