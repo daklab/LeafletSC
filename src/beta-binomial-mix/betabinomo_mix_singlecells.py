@@ -18,6 +18,7 @@ import argparse
 from scipy.stats import binom
 from tqdm import tqdm
 import sklearn.cluster
+from scipy.stats import binom
 
 # %%    
 #parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
@@ -224,7 +225,7 @@ def update_variational_parameters(ALPHA, PI, GAMMA, PHI, final_data, hypers):
 
 # %%
 
-def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, num_iterations=5):
+def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, num_iterations=5, tolerance=1e-6):
     
     '''
     Run CAVI
@@ -232,7 +233,7 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
 
     if hypers is None: 
         hypers = {
-            "eta" : 1., # or 1/K? 
+            "eta" : 1/K, # 1 or 1/K
             "alpha_prior" : 1., # karin had 0.65 
             "pi_prior" : 1. 
         }
@@ -244,41 +245,55 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
     print("Got the initial ELBO ^")
  
     for iteration in range(num_iterations):
-    #while (iteration < num_iterations):
         print("ELBO", elbos[-1],  "CAVI iteration # ", iteration+1, end = "\r")
         ALPHA, PI, GAMMA, PHI = update_variational_parameters(ALPHA, PI, GAMMA, PHI, my_data, hypers)
         elbo = get_elbo(ALPHA, PI, GAMMA, PHI, my_data, hypers)
         elbos.append(elbo)
-        if elbos[-1] < elbos[-2]: break # add tolerance? 
-    
-    print("ELBO converged @",elbos[-1]," CAVI iteration # ", iteration+1, " complete")
+        if abs(elbos[-1] - elbos[-2]) < tolerance:
+            convergence_message = "ELBO converged @ {} CAVI iteration # {} complete".format(elbos[-1], iteration + 1)
+            break
+
+    if convergence_message:
+        print(convergence_message)
+
+    print("Finished CAVI!")
     return(ALPHA.cpu(), PI.cpu(), GAMMA.cpu(), PHI.cpu(), elbos) # move results back to CPU to avoid clogging GPU
 
 # %% 
-
-def calculate_predictive_lik(theta, val_data):
-
-    print("The number of cells going into validation data is:" + str(len(val_data.cell_id_index.unique())))
-    K = theta.shape[0]
-    final_ll = 0.0
-    print("Calculating Predictive Log Likelihood using validation dataset")
+def calculate_predictive_lik(theta, psi, y, n):
+    """
+    Calculate the predictive likelihood.
     
-    # Calculate binomial likelihoods for all cell-junction pairs using vectorized operations
-    all_ks=[]
-    for k in range(K):
-        #print("Calculating Predictive Log Likelihood for cell state", k)
-        binom_likelihood = binom.pmf(val_data['junc_count'].values, val_data['cluster_count'].values, val_data['state_'+str(k)].values)
-        all_ks.append(np.dot(binom_likelihood, theta[k]))
-
-    tensor_list = [torch.tensor(arr) for arr in all_ks]
-    tensor_stacked= torch.stack(tensor_list)
-    sums_across_k = torch.sum(tensor_stacked, dim=0)
-    # Add a small constant to avoid taking the log of zero or small numbers
-    small_constant = 1e-10  # You can adjust this value as needed
-    log_sums_across_columns = torch.log(sums_across_k + small_constant)
-    final_ll = torch.sum(log_sums_across_columns)
-    print("Predictive Log Likelihood:", final_ll, "with K =", K, " cell states")
-    return final_ll
+    Parameters:
+    - theta (1D array): array of theta values of size K
+    - psi (2D array): matrix of psi values of size JxK
+    - y (2D array): matrix of y values of size CxJ
+    - n (2D array): matrix of n values of size CxJ
+    
+    Returns:
+    - L_pred (float): calculated predictive likelihood
+    """
+    
+    C, J = y.shape  # C classes and J observations
+    K = len(theta)  # Number of theta values
+    
+    L_pred = 0  # Initialize the predictive likelihood
+    
+    for c in range(C):
+        inner_sum = 0
+        
+        for k in range(K):
+            sum_j = 0  # Initialize the sum over j
+            
+            for j in range(J):
+                # Compute the log binomial probability
+                sum_j += binom.logpmf(y[c, j], n[c, j], psi[j, k])
+            
+            inner_sum += np.exp(np.log(theta[k]) + sum_j)
+        
+        L_pred += np.log(inner_sum)
+    
+    return L_pred
 
 # Functions for differential splicing analysis 
 def log_beta(a, b):

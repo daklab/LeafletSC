@@ -165,14 +165,13 @@ def read_file(filename, sequencing_type, col_names, junc_suff, min_intron, max_i
     juncs['cell_type'] = cell_type
     mask = juncs["score"] >= min_junc_reads
     juncs = juncs[mask]
-    yield juncs
+    return juncs
 
 
 def load_files(filenames, sequencing_type, junc_suffix, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads):
     
     start_time = time.time()
     junc_suff = junc_suffix.split("*")[1]
-    print(junc_suff)
 
     # Convert parameters to integers outside the loop
     min_intron = int(min_intron)
@@ -186,16 +185,15 @@ def load_files(filenames, sequencing_type, junc_suffix, min_intron, max_intron, 
         min_num_cells_wjunc = int(min_num_cells_wjunc)
         col_names.append("num_cells_wjunc")
         col_names.append("cell_readcounts")
-        print(sequencing_type, junc_suff, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads)
     
     print("Loading files obtained from " + sequencing_type + " sequencing")  
-    print(col_names)
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         results = list(executor.map(lambda x: read_file(x, sequencing_type, col_names, junc_suff, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads), filenames))
 
     print("Concatenating all the junctions")
     all_juncs = pd.concat(results)
+
     print("Reading all the junctions took " + str(round((time.time()-start_time), 2)) + " seconds")
     return all_juncs
 

@@ -29,8 +29,9 @@ def load_cluster_data(input_file=None, input_folder=None, celltypes = None, num_
             else:
                 pass
 
-    # concatenate all dataframes
-    summarized_data = pd.concat(df_list, ignore_index=True)
+        # concatenate all dataframes
+        summarized_data = pd.concat(df_list, ignore_index=True)
+    
     print("Finished reading in data from folder ...")
 
     #if want to look at only specific subset of cell types 
