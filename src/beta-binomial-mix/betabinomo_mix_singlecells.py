@@ -251,10 +251,11 @@ def calculate_CAVI(K, my_data, float_type, hypers = None, init_labels = None, nu
         elbos.append(elbo)
         if abs(elbos[-1] - elbos[-2]) < tolerance:
             convergence_message = "ELBO converged @ {} CAVI iteration # {} complete".format(elbos[-1], iteration + 1)
+            print(convergence_message)
             break
 
-    if convergence_message:
-        print(convergence_message)
+    #if convergence_message:
+    #    print(convergence_message)
 
     print("Finished CAVI!")
     return(ALPHA.cpu(), PI.cpu(), GAMMA.cpu(), PHI.cpu(), elbos) # move results back to CPU to avoid clogging GPU

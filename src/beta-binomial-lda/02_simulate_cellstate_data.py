@@ -29,8 +29,7 @@ torch.manual_seed(42)
 
 # We want to create a simulated dataset of junction and intron cluster counts across single cells 
 # which resembles observed levels of coverage and splicing. We simulate it to have cell states defined by 
-# differences in splice junction counts. The goal is see if the model defined in 03_betabinom_LDA_singlecells.py
-# can recover the cell states.
+# differences in splice junction counts. 
 
 # Define class for generative model of junction and intron cluster counts
 #________________________________________________________________________________________________________________
@@ -151,8 +150,8 @@ class JunctionClusterCounts():
 #________________________________________________________________________________________________________________
 
 num_states = 2
-num_junctions = 5000
-num_cells = 200
+num_junctions = 15000
+num_cells = 1000
 
 # create an instance of the JunctionClusterCounts class
 jc_counts = JunctionClusterCounts(num_cells, num_junctions, num_states)

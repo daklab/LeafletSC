@@ -6,7 +6,7 @@ import os
 
 # load data 
 
-def load_cluster_data(input_file=None, input_folder=None, celltypes = None, num_cells_sample = None):
+def load_cluster_data(input_file=None, input_folder=None, celltypes = None, num_cells_sample = None, max_intron_count=None, has_genes="no"):
 
    # read in hdf file 
     if input_file:
@@ -36,7 +36,12 @@ def load_cluster_data(input_file=None, input_folder=None, celltypes = None, num_
 
     #if want to look at only specific subset of cell types 
     if celltypes:
+        print("Looking at only specific cell types ..." + str(celltypes))
         summarized_data = summarized_data[summarized_data["cell_type"].isin(celltypes)]
+        # redo cell id indexing in summarized data, assign cell id index to each cell id
+        summarized_data["cell_id_index"] = pd.factorize(summarized_data.cell_id)[0]
+        # same for junction id indexing
+        summarized_data["junction_id_index"] = pd.factorize(summarized_data.junction_id)[0]
 
     if num_cells_sample:
         summarized_data = summarized_data.sample(n=num_cells_sample)
@@ -44,6 +49,18 @@ def load_cluster_data(input_file=None, input_folder=None, celltypes = None, num_
     print(summarized_data["cell_type"].unique())
     print(len(summarized_data["cell_id"].unique()))
     print(summarized_data.junction_id_index.max())
+
+    # remove outliers 
+    if max_intron_count:
+        print("The maximum junction count was initially: ", summarized_data["Cluster_Counts"].max())
+        clusts_remove = summarized_data[summarized_data["Cluster_Counts"] > max_intron_count].Cluster.unique()
+        # remove all clusters that these junctions belong to 
+        print(len(clusts_remove))
+        summarized_data = summarized_data[~summarized_data["Cluster"].isin(clusts_remove)]
+        print("The maximum junction count is now: ", summarized_data["Cluster_Counts"].max())
+        # renumber cell_id_index and junction_id_index
+        summarized_data["cell_id_index"] = pd.factorize(summarized_data.cell_id)[0]
+        summarized_data["junction_id_index"] = pd.factorize(summarized_data.junction_id)[0]
 
     coo = summarized_data[["cell_id_index", "junction_id_index", "junc_count", "Cluster_Counts", "Cluster", "junc_ratio"]]
 
@@ -53,6 +70,12 @@ def load_cluster_data(input_file=None, input_folder=None, celltypes = None, num_
 
     junction_ids_conversion = summarized_data[["junction_id_index", "junction_id", "Cluster"]].drop_duplicates()
     junction_ids_conversion = junction_ids_conversion.sort_values("junction_id_index")
+
+    print(summarized_data.head())
+
+    if has_genes == "yes":
+        junction_ids_conversion = summarized_data[["junction_id_index", "junction_id", "Cluster", "gene_id"]].drop_duplicates()
+        junction_ids_conversion = junction_ids_conversion.sort_values("junction_id_index")
  
     # make coo_matrix for junction counts
     coo_counts_sparse = coo_matrix((coo.junc_count, (coo.cell_id_index, coo.junction_id_index)), shape=(len(coo.cell_id_index.unique()), len(coo.junction_id_index.unique())))
