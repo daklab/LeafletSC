@@ -330,13 +330,16 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
         print("This step may take a while, will implement parallelization soon!")
         junc_scores_all = refine_clusters(clusters_df.Cluster.unique(), clusters_df, juncs) 
         junc_scores_all = pd.DataFrame(junc_scores_all, columns=["Cluster", "junction_id", "junction_score"])
+        # save full dataset
+        juncs_all = junc_scores_all.copy()
         # remove junctions that have low scores via threshold_inc 
-        junc_scores_all = junc_scores_all[junc_scores_all.junction_score >= threshold_inc]
+        junc_scores_all = junc_scores_all[junc_scores_all.junction_score < threshold_inc]
         print("The number of junctions after filtering low confidence junctions is " + str(len(junc_scores_all.junction_id.unique())), flush=True)
 
         # given junctions that remain, see if need to recluster introns (low confidence junctions removed)
         print("Reclustering intron splicing events after low confidence junction removal", flush=True)
-        juncs_gr = juncs_gr[juncs_gr.junction_id.isin(junc_scores_all["junction_id"])]
+        # filter juncs_gr such that it does not contain the junctions in junc_scores_all
+        juncs_gr = juncs_gr[~juncs_gr.junction_id.isin(junc_scores_all.junction_id)]
         # check if there are any duplicate entried in pyranges object 
         juncs_gr = juncs_gr.drop_duplicate_positions()
         # drop original cluster column and add new one
@@ -355,15 +358,13 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
         # ensure that in every cluster, we only keep junctions that share splice sites 
         print("Confirming that junctions in each cluster share splice sites", flush=True)
         keep_junction_ids = clusters_df.groupby('Cluster').apply(filter_junctions_in_cluster)
-        keep_junction_ids = np.concatenate(keep_junction_ids.values)
-        
+        keep_junction_ids = np.concatenate(keep_junction_ids.values)        
         juncs_gr = juncs_gr[juncs_gr.junction_id.isin(keep_junction_ids)]
         clusters_df = clusters_df[clusters_df.junction_id.isin(keep_junction_ids)]
         juncs = juncs[juncs.junction_id.isin(clusters_df["junction_id"])]     
+
     assert((clusters_df.groupby(['Cluster'])["gene_id"].nunique().reset_index().gene_id.unique() == 1))
     clusts_unique = clusters.df[["Cluster", "junction_id", "gene_id", "Count"]].drop_duplicates()
-
-    clusts_unique = clusters.df[["Cluster", "junction_id", "Count"]].drop_duplicates()
 
     # merge juncs_gr with corresponding cluster id
     juncs = juncs.merge(clusts_unique, how="left")
