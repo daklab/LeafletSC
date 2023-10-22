@@ -133,3 +133,49 @@ def check_cell_pairs(bbmix_results, row_colors, col_colors, cell_type_colors, nu
     return(sum_matrices)
 
 
+def consensus_clustering(results):
+
+    num_trials = len(results)
+    N = results[0][3].shape[0]
+    all_iters_PHI_f = [ result[3] for result in results ]
+    i = 0
+
+    dfs_list = []
+
+    for PHI_var in all_iters_PHI_f:
+        probability_tensor = PHI_var
+        # Create an array with cell IDs (e.g., cell_0, cell_1, ..., cell_(N-1))
+        cell_ids = np.arange(probability_tensor.shape[0])
+        cell_ids = [cell_id for cell_id in cell_ids]
+        # Get the cluster IDs for each cell based on the maximum probability
+        cluster_ids = np.argmax(probability_tensor, axis=1)
+        # Create a DataFrame with the cell_id, cluster_id, and probability columns
+        df = pd.DataFrame({"cell_id": cell_ids, "cluster_id": cluster_ids})
+        # Add column with iteration number
+        df["iteration"] = i
+        i += 1
+        # Append the DataFrame to the list
+        dfs_list.append(df)
+
+    # Concatenate all the DataFrames into a single DataFrame
+    concatenated_df = pd.concat(dfs_list, ignore_index=True)
+    print("Got all cells and their assignments based on PHI_f in each trial!")
+    # initiate list to save results for each iteration
+
+    all_iters_results = [None] * num_trials
+    for trial in range(num_trials):
+        cell_by_cell_matrix = np.zeros((N, N))
+        clusters = concatenated_df.loc[concatenated_df["iteration"] == trial, ["cell_id", "cluster_id"]]
+        unique_clusters = clusters.set_index('cell_id')['cluster_id'].to_dict()
+        # Fill the cell_by_cell_matrix using numpy indexing
+        for cell_id, cluster_id in unique_clusters.items():
+            cell_by_cell_matrix[cell_id, cell_id] = 1
+            same_cluster_cells = clusters[clusters["cluster_id"] ==  cluster_id].cell_id.values
+            cell_by_cell_matrix[cell_id, same_cluster_cells] = 1
+        all_iters_results[trial] = cell_by_cell_matrix
+    # get all pairs of num_trials 
+    print("Got a cell by cell matrix for each trial indicating whether cells were coassigned")
+    # Calculate sum over matrices across all iterations to find cell-cell pairs that are MOST misassigned 
+    print("Getting sum of matrices across all iterations")
+    sum_matrices = sum(all_iters_results)
+    return(sum_matrices)
