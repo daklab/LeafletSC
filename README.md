@@ -10,8 +10,8 @@ Leaflet consists of a Bayesian mixture model that identifies latent cell states 
 
 [Fig1_MLCB.pdf](https://github.com/daklab/Leaflet/files/13072251/Fig1_MLCB.pdf)
 
-<img width="888" alt="GraphicalModelLeaflet" src="https://github.com/daklab/Leaflet/assets/23510936/1d060778-8969-4dd3-a16b-de9ebd69b74a">
-
+## Graphical Model 
+<img width="500" alt="GraphicalModelLeaflet" src="https://github.com/daklab/Leaflet/assets/23510936/1d060778-8969-4dd3-a16b-de9ebd69b74a">
 
 ## Installation
 
