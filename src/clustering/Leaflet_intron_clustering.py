@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="pyranges")
 parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
 
 parser.add_argument('--junc_files', dest='junc_files',
-                    help='path that has all junction files along with counts in single cells or bulk samples, make sure path ends in "/" ')
+                    help='path that has all junction files along with counts in single cells or bulk samples, make sure path ends in "/" Can also be a comma seperated list of paths.')
 
 parser.add_argument('--sequencing_type', dest='sequencing_type',
                     help='were the junction obtained using data from single cell or bulk sequencing? options are "single_cell" or "bulk". Note if sequencing was done using smart-seq2, then use "bulk" option')
@@ -62,8 +62,8 @@ parser.add_argument('--junc_suffix', dest='junc_suffix', #set default param to *
                     help='suffix of junction files')
 
 parser.add_argument('--min_num_cells_wjunc', dest='min_num_cells_wjunc',
-                    default=5,
-                    help='minimum number of cells that have a junction to consider it, default is 5')
+                    default=1,
+                    help='minimum number of cells that have a junction to consider it, default is 1')
 
 parser.add_argument('--filter_low_juncratios_inclust', dest='filter_low_juncratios_inclust',
                     default="yes",
@@ -84,9 +84,13 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     print("The gtf file you provided is " + gtf_file)
     print("This step may take a while depending on the size of your gtf file")
 
+    # calculate how long it takes to read gtf_file and report it 
+    start_time = time.time()
     #[1] extract all exons from gtf file provided 
     gtf = read_gtf(gtf_file) #to reduce the speed of this, can just get rows with exon in the feature column (preprocess this before running package)? check if really necessary
-    
+    end_time = time.time()
+    print("Reading gtf file took " + str(round((end_time-start_time), 2)) + " seconds")
+
     # Make a copy of the DataFrame
     gtf_exons = gtf[(gtf["feature"] == "exon")].copy()
 
@@ -123,48 +127,56 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     return(gtf_exons_gr)
 
 def read_file(filename, sequencing_type, col_names, junc_suff, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads):
+    try:
+        juncs = pd.read_csv(filename, sep="\t", header=None, low_memory=False)    
+        # Check if the DataFrame is not empty
+        if not juncs.empty:
+            juncs = juncs.copy()
+            juncs = juncs.set_axis(col_names, axis=1, copy=False)
 
-    juncs = pd.read_csv(filename, sep="\t", header=None, low_memory=False)
-    juncs = juncs.copy()
-    juncs = juncs.set_axis(col_names, axis=1, copy=False)
+            juncs[['block_add_start', 'block_subtract_end']] = juncs["blockSizes"].str.split(',', expand=True)
+            juncs[['block_add_start', 'block_subtract_end']] = juncs[['block_add_start', 'block_subtract_end']].astype(int)
 
-    juncs[['block_add_start', 'block_subtract_end']] = juncs["blockSizes"].str.split(',', expand=True)
-    juncs[['block_add_start', 'block_subtract_end']] = juncs[['block_add_start', 'block_subtract_end']].astype(int)
+            juncs["chromStart"] = juncs["chromStart"] + juncs['block_add_start']
+            juncs["chromEnd"] = juncs["chromEnd"] - juncs['block_subtract_end']
 
-    juncs["chromStart"] = juncs["chromStart"] + juncs['block_add_start']
-    juncs["chromEnd"] = juncs["chromEnd"] - juncs['block_subtract_end']
+            juncs["intron_length"] = juncs["chromEnd"] - juncs["chromStart"]
 
-    juncs["intron_length"] = juncs["chromEnd"] - juncs["chromStart"]
+            min_intron = int(min_intron)
+            max_intron = int(max_intron)
 
-    min_intron = int(min_intron)
-    max_intron = int(max_intron)
+            mask = (juncs["intron_length"] >= min_intron) & (juncs["intron_length"] <= max_intron)
+            juncs = juncs[mask]
 
-    mask = (juncs["intron_length"] >= min_intron) & (juncs["intron_length"] <= max_intron)
-    juncs = juncs[mask]
+            filename = filename.split("/")[-1]
+            cell_type = ""
 
-    filename = filename.split("/")[-1]
-    cell_type = ""
+            if sequencing_type == "single_cell":
+                mask = juncs["num_cells_wjunc"] >= min_num_cells_wjunc
+                juncs = juncs[mask]
 
-    if sequencing_type == "single_cell":
-        mask = juncs["num_cells_wjunc"] >= min_num_cells_wjunc
-        juncs = juncs[mask]
+                filename = filename.split(junc_suff)[0]
+                if 'batch' in filename:
+                    cell_type = filename.split(".batch")[0]
+                elif 'pseudobulk' in filename:
+                    cell_type = filename.split("_pseudobulk")[0]
+                else:
+                    cell_type = filename+'_cell'
+            elif sequencing_type == "bulk":
+                cell_type = filename.split('.junc')[0]
 
-        filename = filename.split(junc_suff)[0]
-        if 'batch' in filename:
-            cell_type = filename.split(".batch")[0]
-        elif 'pseudobulk' in filename:
-            cell_type = filename.split("_pseudobulk")[0]
-        else:
-            cell_type = filename+'_cell'
-    elif sequencing_type == "bulk":
-        cell_type = filename.split('.junc')[0]
-
-    print(cell_type , flush=True)
-    juncs['cell_type'] = cell_type
-    mask = juncs["score"] >= min_junc_reads
-    juncs = juncs[mask]
-    return juncs
-
+            # if not juncs.shape[0] == 0:
+            if juncs.shape[0] > 0:
+                juncs['cell_type'] = cell_type
+                mask = juncs["score"] >= min_junc_reads
+                juncs = juncs[mask]
+                return juncs
+            else:
+                pass
+    except pd.errors.EmptyDataError:
+        # Handle the specific case where the file is empty (skip, print a message, etc.)
+        pass
+        
 def load_files(filenames, sequencing_type, junc_suffix, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads):
     
     start_time = time.time()
@@ -194,38 +206,41 @@ def load_files(filenames, sequencing_type, junc_suffix, min_intron, max_intron, 
     print("Reading all the junctions took " + str(round((time.time()-start_time), 2)) + " seconds")
     return all_juncs
 
+def preprocess_data(dataset):
+    # Assuming 'score' is a column in 'dataset' that you want to summarize
+    juncs_dat_summ = dataset.groupby(["chrom", "chromStart", "chromEnd", "junction_id"], as_index=False).score.sum()
+    juncs_dat_summ = juncs_dat_summ.merge(
+        juncs_dat_summ.groupby(['chromStart'])['score'].sum().reset_index().rename(columns={'score': 'total_5SS_counts'}),
+        on='chromStart'
+    ).merge(
+        juncs_dat_summ.groupby(['chromEnd'])['score'].sum().reset_index().rename(columns={'score': 'total_3SS_counts'}),
+        on='chromEnd'
+    )
+    juncs_dat_summ['5SS_usage'] = juncs_dat_summ['score'] / juncs_dat_summ['total_5SS_counts']
+    juncs_dat_summ['3SS_usage'] = juncs_dat_summ['score'] / juncs_dat_summ['total_3SS_counts']
+    return juncs_dat_summ
+
+def refine_cluster(cluster, clusters_df, preprocessed_data):
+    clust_dat = clusters_df[clusters_df.Cluster == cluster]
+    juncs_dat_all = preprocessed_data[preprocessed_data.junction_id.isin(clust_dat.junction_id)]
+    ss_score = juncs_dat_all[["5SS_usage", "3SS_usage"]].min().min()
+    junc = juncs_dat_all[(juncs_dat_all["5SS_usage"] == ss_score) | (juncs_dat_all["3SS_usage"] == ss_score)].junction_id.values[0]
+    return [cluster, junc, ss_score]
+
 def refine_clusters(clusters, clusters_df, dataset):
+    preprocessed_data = preprocess_data(dataset)
     all_juncs_scores = []
+    # start time 
+    start_time = time.time()
+    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(lambda x: refine_cluster(x, clusters_df, preprocessed_data), clusters))
+    for result in results:
+        all_juncs_scores.append(result)
 
-    #if clusters is an input of one value convert to list
-    if isinstance(clusters, int):
-        clusters = [clusters]
-
-    for clust in tqdm(clusters):
-        clust_dat = clusters_df[clusters_df.Cluster == clust]
-
-        # Preprocess data
-        juncs_dat_all = dataset[dataset.junction_id.isin(clust_dat.junction_id.unique())]
-        juncs_dat_summ = juncs_dat_all.groupby(["chrom", "chromStart", "chromEnd", "junction_id"], as_index=False).score.sum()
-        
-        # Calculate total counts for 5'SS (chromStart)
-        total_counts_5SS = juncs_dat_summ.groupby(['chromStart'])['score'].sum().reset_index()
-        total_counts_5SS.rename(columns={'score': 'total_5SS_counts'}, inplace=True)
-
-        # Calculate total counts for 3'SS (chromEnd)
-        total_counts_3SS = juncs_dat_summ.groupby(['chromEnd'])['score'].sum().reset_index()
-        total_counts_3SS.rename(columns={'score': 'total_3SS_counts'}, inplace=True)
-
-        # Merge total counts back into the original DataFrame
-        juncs_dat_summ = juncs_dat_summ.merge(total_counts_5SS, on='chromStart').merge(total_counts_3SS, on='chromEnd')
-
-        # Calculate proportions for each junction
-        juncs_dat_summ['5SS_usage'] = juncs_dat_summ['score'] / juncs_dat_summ['total_5SS_counts']
-        juncs_dat_summ['3SS_usage'] = juncs_dat_summ['score'] / juncs_dat_summ['total_3SS_counts']
-        ss_score=juncs_dat_summ[["5SS_usage", "3SS_usage"]].min().min()
-        # find junc that has ss_score value in the dataframe
-        junc = juncs_dat_summ[(juncs_dat_summ["5SS_usage"] == ss_score) | (juncs_dat_summ["3SS_usage"] == ss_score)].junction_id.values[0]
-        all_juncs_scores.append([clust, junc, ss_score])
+    # end time
+    end_time = time.time()
+    print("Refining clusters took " + str(round((end_time-start_time), 2)) + " seconds")
     return all_juncs_scores
 
 def filter_junctions_in_cluster(group_df):
@@ -256,16 +271,28 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     print("Done extracting exons from gtf file")
 
     #[2] collect all junctions across all cell types 
-    all_files = glob.glob(os.path.join(junc_files, junc_suffix)) #this suffix should be user defined in case they used something else when running Regtools 
-       
-    print("The number of regtools junction files to be processed is " + str(len(all_files)), flush=True)
-    print(all_files, flush=True)
-    
-    # concat all junction files by reading them in parallel first
-    juncs = load_files(all_files, sequencing_type, junc_suffix, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads)
+    start_time = time.time()
+    all_juncs = []
+    # make sure that junc_files is a list 
+    if isinstance(junc_files, str):
+        junc_files = [junc_files]
 
+    print(junc_files)
+
+    for junc_path in junc_files:
+        print(junc_path, flush=True)
+        junc_files_in_path = glob.glob(os.path.join(junc_path, junc_suffix))
+        print("The number of regtools junction files to be processed is " + str(len(junc_files_in_path)), flush=True)
+        # Call load_files for the current path
+        juncs = load_files(junc_files_in_path, sequencing_type, junc_suffix, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads)
+        all_juncs.append(juncs)   
+
+    end_time = time.time()
+    print("Reading all junction files took " + str(round((end_time-start_time), 2)) + " seconds", flush=True)
     print("Done extracting junctions!", flush=True)
-
+   
+    # combine all_juncs into one dataframe 
+    juncs = pd.concat(all_juncs)
     juncs = juncs.copy()
 
     # if "chr" appears in the chrom column 
@@ -334,7 +361,7 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
         juncs_all = junc_scores_all.copy()
         # remove junctions that have low scores via threshold_inc 
         junc_scores_all = junc_scores_all[junc_scores_all.junction_score < threshold_inc]
-        print("The number of junctions after filtering low confidence junctions is " + str(len(junc_scores_all.junction_id.unique())), flush=True)
+        print("The number of low confidence junctions is " + str(len(junc_scores_all.junction_id.unique())), flush=True)
 
         # given junctions that remain, see if need to recluster introns (low confidence junctions removed)
         print("Reclustering intron splicing events after low confidence junction removal", flush=True)
