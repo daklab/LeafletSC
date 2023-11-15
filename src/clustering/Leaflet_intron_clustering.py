@@ -66,8 +66,8 @@ parser.add_argument('--min_num_cells_wjunc', dest='min_num_cells_wjunc',
                     help='minimum number of cells that have a junction to consider it, default is 1')
 
 parser.add_argument('--filter_low_juncratios_inclust', dest='filter_low_juncratios_inclust',
-                    default="yes",
-                    help='yes if want to remove lowly used junctions in clusters, default is yes')
+                    default="no",
+                    help='yes if want to remove lowly used junctions in clusters, default is no')
 
 parser.add_argument('--strict_filter', dest='strict_filter',
                     default=True,
@@ -128,7 +128,12 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
 
 def read_file(filename, sequencing_type, col_names, junc_suff, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads):
     try:
+        if not os.path.exists(filename):
+            print(f"File '{filename}' does not exist.")
+            return None
+        
         juncs = pd.read_csv(filename, sep="\t", header=None, low_memory=False)    
+  
         # Check if the DataFrame is not empty
         if not juncs.empty:
             juncs = juncs.copy()
@@ -168,17 +173,18 @@ def read_file(filename, sequencing_type, col_names, junc_suff, min_intron, max_i
             # if not juncs.shape[0] == 0:
             if juncs.shape[0] > 0:
                 juncs['cell_type'] = cell_type
+                # should do this filter once all cells are read below during load_files...
                 mask = juncs["score"] >= min_junc_reads
                 juncs = juncs[mask]
                 return juncs
             else:
-                pass
+                print(juncs)
+                print(f"No valid data in file '{filename}'.")
     except pd.errors.EmptyDataError:
         # Handle the specific case where the file is empty (skip, print a message, etc.)
         pass
         
 def load_files(filenames, sequencing_type, junc_suffix, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads):
-    
     start_time = time.time()
     junc_suff = junc_suffix.split("*")[1]
 
@@ -200,9 +206,7 @@ def load_files(filenames, sequencing_type, junc_suffix, min_intron, max_intron, 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         results = list(executor.map(lambda x: read_file(x, sequencing_type, col_names, junc_suff, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads), filenames))
 
-    print("Concatenating all the junctions")
     all_juncs = pd.concat(results)
-
     print("Reading all the junctions took " + str(round((time.time()-start_time), 2)) + " seconds")
     return all_juncs
 
@@ -262,27 +266,24 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #        Run analysis and obtain intron clusters
     #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    
+
+    junc_files = junc_files.split(',')
+    print(junc_files)
+
     # Redirect standard output to the log file
     sys.stdout = log_file
-
-    #[1] load gtf coordinates into pyranges object 
-    gtf_exons_gr = process_gtf(gtf_file)
-    print("Done extracting exons from gtf file")
 
     #[2] collect all junctions across all cell types 
     start_time = time.time()
     all_juncs = []
+
     # make sure that junc_files is a list 
     if isinstance(junc_files, str):
         junc_files = [junc_files]
 
-    print(junc_files)
-
     for junc_path in junc_files:
-        print(junc_path, flush=True)
         junc_files_in_path = glob.glob(os.path.join(junc_path, junc_suffix))
-        print("The number of regtools junction files to be processed is " + str(len(junc_files_in_path)), flush=True)
+        print("The number of regtools junction files to be processed is " + str(len(junc_files_in_path)))
         # Call load_files for the current path
         juncs = load_files(junc_files_in_path, sequencing_type, junc_suffix, min_intron, max_intron, min_num_cells_wjunc, min_junc_reads)
         all_juncs.append(juncs)   
@@ -292,7 +293,12 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     print("Done extracting junctions!", flush=True)
    
     # combine all_juncs into one dataframe 
-    juncs = pd.concat(all_juncs)
+    if len(all_juncs) > 1:
+        print("More than one Donor with cells of this organ")
+        juncs = pd.concat(all_juncs)
+    else:
+        print("Just one Donor with cells of this organ")
+        juncs = all_juncs[0]    
     juncs = juncs.copy()
 
     # if "chr" appears in the chrom column 
@@ -313,6 +319,10 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
 
     #keep only junctions that could be actually related to isoforms that we expect in our cells (via gtf file provided)
     print("The number of junctions prior to assessing distance to exons is " + str(len(juncs_gr.junction_id.unique())), flush=True)
+
+    #[1] load gtf coordinates into pyranges object 
+    gtf_exons_gr = process_gtf(gtf_file)
+    print("Done extracting exons from gtf file")
 
     #[3] annotate each junction with nearbygenes 
     print("Annotating junctions with known exons based on input gtf file", flush=True)
@@ -435,6 +445,7 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     with gzip.open(output + '.gz', mode='wt', encoding='utf-8') as f:
         juncs.to_csv(f, index=False, sep="}")
     print("You can find the output file here: " + output + ".gz", flush=True)
+    print("Finished obtaining intron cluster files!")
 
 if __name__ == '__main__':
 
@@ -488,8 +499,3 @@ if __name__ == '__main__':
     # Close the log file when finished
     log_file.close()
 
-#alt gtf file
-#gtf_file="/gpfs/commons/groups/knowles_lab/data/tabula_muris/reference-genome/MM10-PLUS/genes/genes.gtf"
-#gtf_file="/gpfs/commons/groups/knowles_lab/data/tabula_muris/reference-genome/MM10-PLUS/kallisto/Mus_musculus.GRCm38.102.gtf"
-#path = "/gpfs/commons/groups/knowles_lab/Karin/data/BulkRNAseq_Brain/GSE73721/SRR2557112/"
-#sequencing_type = "bulk"
