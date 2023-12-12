@@ -21,7 +21,7 @@ This will automatically install any missing package dependencies.
 
 Alternatively, Leaflet can be installed via conda (in the future). 
 
-## Running Leaflet Scripts
+## Running Leaflet Scripts (in the future will just be internal callable functions from module)
 
 ### Step 1: Intron Clustering (identifying alternatively spliced events in your data)
 
@@ -103,3 +103,11 @@ For now, please use the following jupyter notebook as a reference for how this m
 ```
 /Leaflet/notebooks/example_analysis/run_mixture_model_TM_SS2_wanno.ipynb
 ```
+
+### To-do: 
+
+1. Add documentation and some tests for how to run the simulation code 
+2. Add 10X/split-seq mode in addition to smart-seq2
+3. Re-write code for running a zero-inflation test 
+4. Adapt repo to align with scVI-tools framework
+5. Extend framework to seurat/scanpy objects 
