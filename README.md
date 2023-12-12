@@ -9,6 +9,7 @@ Leaflet consists of a Bayesian mixture model that identifies latent cell states 
 - Smart-Seq2 (for now*)
 
 ## Graphical Model (update)
+[Figure2_GM.pdf](https://github.com/daklab/Leaflet/files/13650327/Figure2_GM.pdf)
 <img width="500" alt="GraphicalModelLeaflet" src="https://github.com/daklab/Leaflet/assets/23510936/1d060778-8969-4dd3-a16b-de9ebd69b74a">
 
 ## Installation
