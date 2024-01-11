@@ -110,4 +110,6 @@ For now, please use the following jupyter notebook as a reference for how this m
 2. Add 10X/split-seq mode in addition to smart-seq2
 3. Re-write code for running a zero-inflation test 
 4. Adapt repo to align with scVI-tools framework
-5. Extend framework to seurat/scanpy objects 
+5. Extend framework to seurat/scanpy anndata objects
+6. Add notes on generative model and inference method
+7. Craft the module 
