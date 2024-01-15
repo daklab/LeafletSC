@@ -160,11 +160,9 @@ def fit(y, total_counts, K, guide, patience=5, min_delta=0.01, lr=0.05, num_epoc
 
         if j % 10 == 0:
             print(f"Epoch {j}, Loss: {loss}")
-
-        #torch.cuda.empty_cache()  # Attempt to free unused memory
     return losses
 
-def main(y, total_counts, K=50, loss_plot=True):
+def main(y, total_counts, K=50, loss_plot=True, num_epochs=100):
 
     """
     Main function to fit the Bayesian model.
@@ -179,7 +177,8 @@ def main(y, total_counts, K=50, loss_plot=True):
     guide = AutoDiagonalNormal(model)
 
     # Fit the model
-    losses = fit(y, total_counts, K, guide, patience=5, min_delta=0.01, lr=0.05, num_epochs=500)
+    losses = fit(y, total_counts, K, guide, patience=5, min_delta=0.01, lr=0.05, num_epochs=num_epochs)
+    
     if loss_plot:
         plt.plot(losses)
         plt.xlabel("Epoch")

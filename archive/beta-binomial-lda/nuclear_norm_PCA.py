@@ -11,9 +11,6 @@ import collections
 
 SVD_Result = collections.namedtuple("SVD_Result", "U S V")
 
-def sparse_sum(x, dim):
-    return np.squeeze(np.asarray(x.sum(dim)))
-
 def power_iteration(A, its = 20, tol = 1e-3, verbose = False):
     """This is roughly equivalent to torch.svd_lowrank(A, q = 1, niter = its, M = None). 
     However, it also has a tol parameter. If the two most recent estimates of the top
