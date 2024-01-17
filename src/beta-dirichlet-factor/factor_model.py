@@ -53,7 +53,7 @@ def my_log_prob(y_sparse, total_counts_sparse, pred):
     return log_probs.sum()
 
 
-def model(y, total_counts, K):
+def model(y, total_counts, K, use_global_prior=True):
 
     """
     Define a probabilistic Bayesian model using a Beta-Dirichlet factorization.
@@ -69,6 +69,7 @@ def model(y, total_counts, K):
     y (torch.Tensor): A tensor representing observed data (junction counts).
     total_counts (torch.Tensor): A tensor representing the total counts for each observation (total intron cluster counts).
     K (int): The number of factors representing cell states.
+    use_global_prior (bool, optional): Whether to use a global prior for psi. Default is True.
 
     Latent Variables and Priors:
     - a, b: Parameters for the Beta distribution, modeling the average behavior per junction, sampled from a Gamma distribution.
@@ -88,14 +89,26 @@ def model(y, total_counts, K):
 
     N, P = y.shape
 
-    a = pyro.sample("a", dist.Gamma(1., 1.).expand([P]).to_event(1))
-    b = pyro.sample("b", dist.Gamma(1., 1.).expand([P]).to_event(1))
+    #a = pyro.sample("a", dist.Gamma(1., 1.).expand([P]).to_event(1)) #this means each junction gets its own a and b and they are assumed independent
+    #b = pyro.sample("b", dist.Gamma(1., 1.).expand([P]).to_event(1))
 
-    psi_dist = dist.Beta(a, b).expand([K, P]).to_event(2)
-    psi = pyro.sample("psi", psi_dist)
+    if use_global_prior:
+        # Global priors for all junctions
+        a_global = pyro.sample("a_global", dist.Gamma(1., 1.))
+        b_global = pyro.sample("b_global", dist.Gamma(1., 1.))
+        # Factor-specific parameters influenced by global priors
+        a = pyro.sample("a", dist.Gamma(a_global, 1.).expand([K, P]).to_event(2))
+        b = pyro.sample("b", dist.Gamma(b_global, 1.).expand([K, P]).to_event(2))
+    else:
+        # Independent junction-specific parameters without global influence
+        a = pyro.sample("a", dist.Gamma(1., 1.).expand([P]).to_event(1))
+        b = pyro.sample("b", dist.Gamma(1., 1.).expand([P]).to_event(1))
 
-    pi = pyro.sample("pi", dist.Dirichlet(torch.ones(K) / K))
-    conc = pyro.sample("conc", dist.Gamma(1, 1))
+    psi_dist = dist.Beta(a, b).expand([K, P]).to_event(2) # this is safer because can handle both cases when (a,b) are already K,P shaped (global prior used) or not (global prior not used)
+    psi = pyro.sample("psi", psi_dist) # shape is K,P
+
+    pi = pyro.sample("pi", dist.Dirichlet(torch.ones(K) / K)) # shape is K 
+    conc = pyro.sample("conc", dist.Gamma(1, 1)) # shape is 1
 
     with pyro.plate('data1', N):
         assign_dist = dist.Dirichlet(pi * conc)
