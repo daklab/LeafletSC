@@ -53,7 +53,7 @@ def my_log_prob(y_sparse, total_counts_sparse, pred):
     return log_probs.sum()
 
 
-def model(y, total_counts, K, use_global_prior=True):
+def model(y, total_counts, K):
 
     """
     Define a probabilistic Bayesian model using a Beta-Dirichlet factorization.
@@ -69,7 +69,6 @@ def model(y, total_counts, K, use_global_prior=True):
     y (torch.Tensor): A tensor representing observed data (junction counts).
     total_counts (torch.Tensor): A tensor representing the total counts for each observation (total intron cluster counts).
     K (int): The number of factors representing cell states.
-    use_global_prior (bool, optional): Whether to use a global prior for psi. Default is True.
 
     Latent Variables and Priors:
     - a, b: Parameters for the Beta distribution, modeling the average behavior per junction, sampled from a Gamma distribution.
@@ -89,49 +88,27 @@ def model(y, total_counts, K, use_global_prior=True):
 
     N, P = y.shape
 
-    if use_global_prior:
-        # Sample global parameters for each junction
-        a_global = pyro.sample("a_global", dist.Gamma(1., 1.).expand([P]).to_event(1))
-        b_global = pyro.sample("b_global", dist.Gamma(1., 1.).expand([P]).to_event(1))
+    a = pyro.sample("a", dist.Gamma(1., 1.).expand([P]).to_event(1))
+    b = pyro.sample("b", dist.Gamma(1., 1.).expand([P]).to_event(1))
 
-        # Factor-specific parameters influenced by the respective global prior for each junction
-        a = pyro.sample("a", dist.Gamma(a_global.unsqueeze(0).expand([K, P]), 1.).to_event(2))
-        b = pyro.sample("b", dist.Gamma(b_global.unsqueeze(0).expand([K, P]), 1.).to_event(2))
-    else:
-        # Independent junction-specific parameters without global influence
-        a = pyro.sample("a", dist.Gamma(1., 1.).expand([P]).to_event(1))
-        b = pyro.sample("b", dist.Gamma(1., 1.).expand([P]).to_event(1))# per junction to model average behaviour
+    psi_dist = dist.Beta(a, b).expand([K, P]).to_event(2)
+    psi = pyro.sample("psi", psi_dist)
 
-    psi_dist = dist.Beta(a, b).expand([K, P]).to_event(2) # this is safer because can handle both cases when (a,b) are already K,P shaped (global prior used) or not (global prior not used)
-    psi = pyro.sample("psi", psi_dist) # shape is K,P
-    
-    if use_global_prior:
-        psi = torch.clamp(psi, min=0.0001, max=0.9999) # not sure exactly why this is needed, but it prevents the issue of having [1.000] tensors in pred before binomial log prob calculation
-    
-    # Sampling pi values and conc for each factor
-    pi = pyro.sample("pi", dist.Dirichlet(torch.ones(K) / K)) # shape is K, represents the base probabilities for each of the K factors via uniform prior (initially all factors are equally likely)
-    conc = pyro.sample("conc", dist.Gamma(1, 1)) # value scales the pi vector (higher conc makes the sampled probs more uniform, a lower conc allows more variability, leading to probability vectors that might be skewed towards certain factors).
+    pi = pyro.sample("pi", dist.Dirichlet(torch.ones(K) / K))
+    conc = pyro.sample("conc", dist.Gamma(1, 1))
 
-    # Sampling the assignment of each cell to a factor
     with pyro.plate('data1', N):
         assign_dist = dist.Dirichlet(pi * conc)
         assign = pyro.sample("assign", assign_dist)
 
-    # Compute the predicted probabilities for each cell  (mixture of beta distributions)
     pred = torch.mm(assign, psi)
 
-    #print("a shape:", a.shape, "b shape:", b.shape)
-    #print("psi shape:", psi.shape, "pred shape:", pred.shape)
-    #print("Are all pred values between 0 and 1:", torch.all((pred >= 0) & (pred <= 1)))
-    # print all unique pred values that are not between 0 and 1
-    #print("Unique pred values that are not between 0 and 1:", torch.unique(pred[(pred < 0) | (pred > 1)]))
-    # print sample of pred values that are between 0 and 1 
-    #print("Sample of pred values that are between 0 and 1:", pred[(pred >= 0) & (pred <= 1)][0:10])
-    # Use custom log probability function to compute the likelihood of observations
-    log_prob = my_log_prob(y, total_counts, pred) 
-    pyro.factor("obs", log_prob) 
+    # Use custom log probability
+    log_prob = my_log_prob(y, total_counts, pred) # double check that I am not double summing here 
+    #pyro.factor("obs", log_prob.sum()) <- i think this one is wrong 
+    pyro.factor("obs", log_prob) # this should be correct 
 
-def fit(y, total_counts, K, use_global_prior, guide, patience=5, min_delta=0.01, lr=0.05, num_epochs=500):
+def fit(y, total_counts, K, guide, patience=5, min_delta=0.01, lr=0.05, num_epochs=500):
     
     """
     Fit a probabilistic model using Stochastic Variational Inference (SVI).
@@ -166,9 +143,7 @@ def fit(y, total_counts, K, use_global_prior, guide, patience=5, min_delta=0.01,
     epochs_since_improvement = 0
 
     for j in range(num_epochs):
-        #print(j)
-        # Pass use_global_prior to the model in the SVI step
-        loss = svi.step(y, total_counts, K, use_global_prior)
+        loss = svi.step(y, total_counts, K)
         losses.append(loss)
 
         # Check for improvement
@@ -187,7 +162,7 @@ def fit(y, total_counts, K, use_global_prior, guide, patience=5, min_delta=0.01,
             print(f"Epoch {j}, Loss: {loss}")
     return losses
 
-def main(y, total_counts, use_global_prior=True, K=50, loss_plot=True, lr = 0.05, num_epochs=100):
+def main(y, total_counts, K=50, loss_plot=True, num_epochs=100):
 
     """
     Main function to fit the Bayesian model.
@@ -202,7 +177,7 @@ def main(y, total_counts, use_global_prior=True, K=50, loss_plot=True, lr = 0.05
     guide = AutoDiagonalNormal(model)
 
     # Fit the model
-    losses = fit(y, total_counts, K, use_global_prior, guide, patience=5, min_delta=0.01, lr=lr, num_epochs=num_epochs)
+    losses = fit(y, total_counts, K, guide, patience=5, min_delta=0.01, lr=0.05, num_epochs=num_epochs)
     
     if loss_plot:
         plt.plot(losses)
@@ -212,7 +187,7 @@ def main(y, total_counts, use_global_prior=True, K=50, loss_plot=True, lr = 0.05
 
     # Sample from the guide (posterior)
     sampled_guide = guide()
-    guide_trace = pyro.poutine.trace(guide).get_trace(y, total_counts, K, use_global_prior)
+    guide_trace = pyro.poutine.trace(guide).get_trace(y, total_counts, K)
 
     # Extract the latent variables 
     latent_vars = {name: node["value"].detach().cpu().numpy() for name, node in guide_trace.nodes.items() if node["type"] == "sample"}
