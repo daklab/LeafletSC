@@ -90,35 +90,47 @@ def model(y, total_counts, K, use_global_prior=True):
     N, P = y.shape
 
     if use_global_prior:
-        # Sample global parameters for each junction
-        a_global = pyro.sample("a_global", dist.Gamma(1., 1.).expand([P]).to_event(1))
-        b_global = pyro.sample("b_global", dist.Gamma(1., 1.).expand([P]).to_event(1))
 
-        # Factor-specific parameters influenced by the respective global prior for each junction
-        a = pyro.sample("a", dist.Gamma(a_global.unsqueeze(0).expand([K, P]), 1.).to_event(2))
-        b = pyro.sample("b", dist.Gamma(b_global.unsqueeze(0).expand([K, P]), 1.).to_event(2))
+        # Global priors for PSI
+        a_global = pyro.sample("a_global", dist.Gamma(1., 1.))
+        b_global = pyro.sample("b_global", dist.Gamma(1., 1.))
+
+        # This setup allows you to model the influence of junctions on factors 
+        # with a common prior, capturing the idea that some junctions might be 
+        # consistently used across different factors.
+        # Capture shared + unique behavior of each junction
+        # Hierarchical models enable partial pooling of information, where data from different 
+        # groups (junctions) inform the estimation of global parameters, and these global 
+        # parameters, in turn, influence the group-specific parameters. This can lead to more 
+        # robust estimates, especially in cases of limited data.
+
+        # Sample PSI for each junction
+        with pyro.plate('junctions', P):
+            psi = pyro.sample("psi", dist.Beta(a_global, b_global).expand([K]).to_event(1))
+
     else:
         # Independent junction-specific parameters without global influence
         a = pyro.sample("a", dist.Gamma(1., 1.).expand([P]).to_event(1))
         b = pyro.sample("b", dist.Gamma(1., 1.).expand([P]).to_event(1))# per junction to model average behaviour
-
-    psi_dist = dist.Beta(a, b).expand([K, P]).to_event(2) # this is safer because can handle both cases when (a,b) are already K,P shaped (global prior used) or not (global prior not used)
-    psi = pyro.sample("psi", psi_dist) # shape is K,P
+        # old version 
+        # in this setup,the behavior of each junction is modeled independently of others.
+        psi_dist = dist.Beta(a, b).expand([K, P]).to_event(2) 
+        psi = pyro.sample("psi", psi_dist) # shape is K,P
     
-    if use_global_prior:
-        psi = torch.clamp(psi, min=0.0001, max=0.9999) # not sure exactly why this is needed, but it prevents the issue of having [1.000] tensors in pred before binomial log prob calculation
+    #if use_global_prior: dont need this anymore which is good 
+    #    psi = torch.clamp(psi, min=0.0001, max=0.9999) # not sure exactly why this is needed, but it prevents the issue of having [1.000] tensors in pred before binomial log prob calculation
     
     # Sampling pi values and conc for each factor
     pi = pyro.sample("pi", dist.Dirichlet(torch.ones(K) / K)) # shape is K, represents the base probabilities for each of the K factors via uniform prior (initially all factors are equally likely)
     conc = pyro.sample("conc", dist.Gamma(1, 1)) # value scales the pi vector (higher conc makes the sampled probs more uniform, a lower conc allows more variability, leading to probability vectors that might be skewed towards certain factors).
 
     # Sampling the assignment of each cell to a factor
-    with pyro.plate('data1', N):
+    with pyro.plate('data2', N):
         assign_dist = dist.Dirichlet(pi * conc)
         assign = pyro.sample("assign", assign_dist)
 
     # Compute the predicted probabilities for each cell  (mixture of beta distributions)
-    pred = torch.mm(assign, psi)
+    pred = torch.mm(assign, psi.T)
 
     #print("a shape:", a.shape, "b shape:", b.shape)
     #print("psi shape:", psi.shape, "pred shape:", pred.shape)
