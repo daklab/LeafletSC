@@ -49,6 +49,7 @@ def my_log_prob(y_sparse, total_counts_sparse, pred):
 
     # Compute log probabilities at these indices
     log_probs = dist.Binomial(total_counts_values, pred[y_indices[0], y_indices[1]]).log_prob(y_values)
+    #print(log_probs.sum())
     # Sum the log probabilities
     return log_probs.sum()
 
@@ -92,8 +93,9 @@ def model(y, total_counts, K, use_global_prior=True):
     if use_global_prior:
 
         # Global priors for PSI
-        a_global = pyro.sample("a_global", dist.Gamma(1., 1.))
-        b_global = pyro.sample("b_global", dist.Gamma(1., 1.))
+        # sample K values for a and b
+        a = pyro.sample("a", dist.Gamma(1., 1.).expand([K]).to_event(1)) # watch out for these .to_event(1), if using multiple a,bs (one for each K, need to include this so they are treated independently)
+        b = pyro.sample("b", dist.Gamma(1., 1.).expand([K]).to_event(1))
 
         # This setup allows you to model the influence of junctions on factors 
         # with a common prior, capturing the idea that some junctions might be 
@@ -106,20 +108,18 @@ def model(y, total_counts, K, use_global_prior=True):
 
         # Sample PSI for each junction
         with pyro.plate('junctions', P):
-            psi = pyro.sample("psi", dist.Beta(a_global, b_global).expand([K]).to_event(1))
+            psi = pyro.sample("psi", dist.Beta(a, b).to_event(1))
+        
+        psi = psi.T # shape is K,P
 
     else:
         # Independent junction-specific parameters without global influence
         a = pyro.sample("a", dist.Gamma(1., 1.).expand([P]).to_event(1))
         b = pyro.sample("b", dist.Gamma(1., 1.).expand([P]).to_event(1))# per junction to model average behaviour
-        # old version 
-        # in this setup,the behavior of each junction is modeled independently of others.
+        # in this setup,the behavior of each junction is modeled independently of others
         psi_dist = dist.Beta(a, b).expand([K, P]).to_event(2) 
         psi = pyro.sample("psi", psi_dist) # shape is K,P
-    
-    #if use_global_prior: dont need this anymore which is good 
-    #    psi = torch.clamp(psi, min=0.0001, max=0.9999) # not sure exactly why this is needed, but it prevents the issue of having [1.000] tensors in pred before binomial log prob calculation
-    
+
     # Sampling pi values and conc for each factor
     pi = pyro.sample("pi", dist.Dirichlet(torch.ones(K) / K)) # shape is K, represents the base probabilities for each of the K factors via uniform prior (initially all factors are equally likely)
     conc = pyro.sample("conc", dist.Gamma(1, 1)) # value scales the pi vector (higher conc makes the sampled probs more uniform, a lower conc allows more variability, leading to probability vectors that might be skewed towards certain factors).
@@ -130,15 +130,10 @@ def model(y, total_counts, K, use_global_prior=True):
         assign = pyro.sample("assign", assign_dist)
 
     # Compute the predicted probabilities for each cell  (mixture of beta distributions)
-    pred = torch.mm(assign, psi.T)
+    pred = torch.mm(assign, psi)
 
     #print("a shape:", a.shape, "b shape:", b.shape)
     #print("psi shape:", psi.shape, "pred shape:", pred.shape)
-    #print("Are all pred values between 0 and 1:", torch.all((pred >= 0) & (pred <= 1)))
-    # print all unique pred values that are not between 0 and 1
-    #print("Unique pred values that are not between 0 and 1:", torch.unique(pred[(pred < 0) | (pred > 1)]))
-    # print sample of pred values that are between 0 and 1 
-    #print("Sample of pred values that are between 0 and 1:", pred[(pred >= 0) & (pred <= 1)][0:10])
     # Use custom log probability function to compute the likelihood of observations
     log_prob = my_log_prob(y, total_counts, pred) 
     pyro.factor("obs", log_prob) 
