@@ -37,8 +37,12 @@ def generate_mask(intron_clusts, mask_percentage=0.1):
     # Get number of entries to mask
     num_masked = int(num_cells * num_junctions * mask_percentage)
 
-    # Get indices of entries to mask
-    masked_indices = torch.randperm(num_cells * num_junctions)[:num_masked]
+    # Make sure this number is less than total number of non-zero entries in intron_clusts
+    assert num_masked < intron_clusts.nnz
+
+    # Get indices of entries to mask, only from indices where values are >=1 in intron_clusts
+    indices_to_mask_from = np.nonzero(intron_clusts)
+    masked_indices = np.random.choice(np.arange(len(indices_to_mask_from[0])), size=num_masked, replace=False)
 
     # Create mask
     mask = np.zeros((num_cells, num_junctions))
@@ -74,8 +78,7 @@ def apply_mask(junction_counts, intron_clusts, mask):
         masked_junction_counts : torch.Tensor
             A C x J matrix of junction counts with masked entries set to 0.
         '''
-    
-        # Mask intron clusters
+        
         masked_intron_clusts = intron_clusts.toarray() * (1 - mask)
     
         # Mask junction counts
@@ -127,33 +130,21 @@ def prep_model_input(masked_junction_counts, masked_intron_clusts):
 
 # next function shoould evaluate model fit on masked data
 
-def evaluate_model(masked_juncs, masked_clusts, true_juncs, true_clusts, model_psi, mask):
+def evaluate_model(true_juncs, true_clusts, model_psi, model_assign, mask):
     
     '''
     Evaluate the factor model on masked data.
 
     Parameters
     ----------
-    masked_junction_counts_tensor : torch.sparse_coo_tensor
-        A sparse tensor of masked junction counts.
+    true_juncs : torch.Tensor
+        A C x J matrix of junction counts with masked entries set to 0.
 
-    masked_intron_clusts_tensor : torch.sparse_coo_tensor
-        A sparse tensor of masked intron clusters.
+    true_clusts : torch.Tensor          
+        A C x J matrix of intron clusters with masked entries set to 0. 
 
-    psi : torch.Tensor
-        A C x K matrix of cell-specific factors.
-
-    phi : torch.Tensor
-        A K x J matrix of junction-specific factors.
-
-    mu : torch.Tensor
-        A C x J matrix of mean junction counts.
-
-    sigma : torch.Tensor
-        A C x J matrix of standard deviations of junction counts.
-
-    mask : torch.Tensor
-        A C x J matrix of 0s and 1s where 1s indicate masked entries.
+    model_psi : torch.Tensor
+        A J x K matrix of cell-specific factor loadings.
 
     Returns
     -------
@@ -161,17 +152,16 @@ def evaluate_model(masked_juncs, masked_clusts, true_juncs, true_clusts, model_p
         The mean squared error between the imputed and observed junction counts.
     '''
 
-    # Get number of cells and junctions
-    num_cells = masked_junction_counts_tensor.shape[0]
-    num_junctions = masked_junction_counts_tensor.shape[1]
+    # get predicted PSI values for each cell and junction
+    pred = model_assign @ model_psi # predicted PSI values for each cell and junction
 
-    # Get indices of unmasked entries
-    unmasked_indices = torch.nonzero(1 - mask)
+    # let's look at only the masked entries
+    masked_pred = pred[np.nonzero(mask)]
+    true_psi = true_juncs / true_clusts
+    # get true_psi values for masked indices 
+    masked_true_psi = true_psi[np.nonzero(mask)]
 
-    # Get imputed junction counts
-    imputed_junction_counts = torch.mm(psi, phi) * sigma + mu
-
-    # Get MSE
-    mse = torch.sum((imputed_junction_counts[unmasked_indices[:, 0], unmasked_indices[:, 1]] - masked_junction_counts_tensor[unmasked_indices[:, 0], unmasked_indices[:, 1]]) ** 2) / (num_cells * num_junctions)
+    # get L1 absolute mean error between masked predicted and true PSI values
+    mse = np.mean(np.abs(masked_pred - masked_true_psi))
 
     return mse
