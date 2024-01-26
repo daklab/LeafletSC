@@ -14,6 +14,8 @@ from pyro.infer import SVI, Trace_ELBO
 from pyro.infer.autoguide import AutoDiagonalNormal
 import torch
 import matplotlib.pyplot as plt
+import random
+import datetime
 
 def my_log_prob(y_sparse, total_counts_sparse, pred):
     
@@ -93,24 +95,25 @@ def model(y, total_counts, K, use_global_prior=True):
     if use_global_prior:
 
         # Global priors for PSI
+        
         # sample K values for a and b
         a = pyro.sample("a", dist.Gamma(1., 1.).expand([K]).to_event(1)) # watch out for these .to_event(1), if using multiple a,bs (one for each K, need to include this so they are treated independently)
         b = pyro.sample("b", dist.Gamma(1., 1.).expand([K]).to_event(1))
 
-        # This setup allows you to model the influence of junctions on factors 
         # with a common prior, capturing the idea that some junctions might be 
         # consistently used across different factors.
         # Capture shared + unique behavior of each junction
-        # Hierarchical models enable partial pooling of information, where data from different 
-        # groups (junctions) inform the estimation of global parameters, and these global 
-        # parameters, in turn, influence the group-specific parameters. This can lead to more 
-        # robust estimates, especially in cases of limited data.
+
+        # some junctions will be more globally used (more consitutive regardless of splicing)
+        # a and b for every junction shared across factors 
 
         # Sample PSI for each junction
         with pyro.plate('junctions', P):
             psi = pyro.sample("psi", dist.Beta(a, b).to_event(1))
         
         psi = psi.T # shape is K,P
+
+    # original code check, check if there was one a globally and b globally 
 
     else:
         # Independent junction-specific parameters without global influence
@@ -194,7 +197,7 @@ def fit(y, total_counts, K, use_global_prior, guide, patience=5, min_delta=0.01,
             print(f"Epoch {j}, Loss: {loss}")
     return losses
 
-def main(y, total_counts, use_global_prior=True, K=50, loss_plot=True, lr = 0.05, num_epochs=100):
+def main(y, total_counts, num_initializations=5, seeds=None, file_prefix=None, use_global_prior=True, save_to_file=True, K=50, loss_plot=True, lr = 0.05, num_epochs=100):
 
     """
     Main function to fit the Bayesian model.
@@ -203,29 +206,75 @@ def main(y, total_counts, use_global_prior=True, K=50, loss_plot=True, lr = 0.05
     y (torch.Tensor): A tensor representing observed junction counts.
     total_counts (torch.Tensor): A tensor representing the observed intron cluster counts.
     K (int, optional): The number of components in the mixture model. Default is 50.
+    num_initializations (int, optional): Number of random initializations. Default is 5.
+    seeds (list, optional): List of seeds for random initializations. Default is None, which will generate random seeds.
     """
 
-    # Define the guide
-    guide = AutoDiagonalNormal(model)
+    # If seeds are not provided, create a list of random seeds
+    if seeds is None:
+        seeds = [random.randint(1, 10000) for _ in range(num_initializations)]
 
-    # Fit the model
-    losses = fit(y, total_counts, K, use_global_prior, guide, patience=5, min_delta=0.01, lr=lr, num_epochs=num_epochs)
-    
-    if loss_plot:
-        plt.plot(losses)
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.show()
+    all_results = []
 
-    # Sample from the guide (posterior)
-    sampled_guide = guide()
-    guide_trace = pyro.poutine.trace(guide).get_trace(y, total_counts, K, use_global_prior)
+    if use_global_prior:
+        print("Using global prior for psi, junctions are shared across factors")
+    else:
+        print("Not using global prior for psi, junctions are independent across factors")
+        
+    for i, seed in enumerate(seeds):
+        print(f"Initialization {i+1} with seed {seed}")
 
-    # Extract the latent variables 
-    latent_vars = {name: node["value"].detach().cpu().numpy() for name, node in guide_trace.nodes.items() if node["type"] == "sample"}
+        # Set the seed
+        pyro.set_rng_seed(seed)
+        torch.manual_seed(seed)
+        random.seed(seed)
 
-    print("Done! Returning losses, sampled_guide, and latent_vars.")
-    return losses, sampled_guide, latent_vars
+        # Define the guide
+        print("Define the guide")
+        guide = AutoDiagonalNormal(model)
+
+        # Fit the model
+        print("Fit the model")
+        losses = fit(y, total_counts, K, use_global_prior, guide, patience=5, min_delta=0.01, lr=lr, num_epochs=num_epochs)
+        if loss_plot:
+            plt.plot(losses)
+            plt.xlabel("Epoch")
+            plt.ylabel("Loss")
+            plt.title(f"Loss Plot for Initialization {i+1}")
+            plt.show()
+
+        # Sample from the guide (posterior)
+        print("Sample from the guide (posterior)")
+        sampled_guide = guide()
+        guide_trace = pyro.poutine.trace(guide).get_trace(y, total_counts, K, use_global_prior)
+
+        # Extract the latent variables 
+        print("Extract the latent variables")
+        latent_vars = {name: node["value"].detach().cpu().numpy() for name, node in guide_trace.nodes.items() if node["type"] == "sample"}
+        all_results.append({
+            'seed': seed,
+            'losses': losses,
+            'sampled_guide': sampled_guide,
+            'latent_vars': latent_vars
+        })
+
+    print("All initializations complete. Returning results.")
+    print("------------------------------------------------")
+
+    if save_to_file:
+        print("Saving results to file")
+
+        # add date time K to file name
+        date = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        if file_prefix is None:
+            file_name = f"results_{date}_{K}_{num_initializations}_factors.pt"
+        else:
+            file_name = f"{file_prefix}_{date}_{K}_{num_initializations}_factors.pt"
+        torch.save(all_results, file_name)
+        print(f"Results saved to {file_name}")
+        print("------------------------------------------------")
+
+    return all_results
 
 if __name__ == "__main__":
     main()
