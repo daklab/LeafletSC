@@ -8,7 +8,7 @@ Leaflet consists of a Bayesian mixture model that identifies latent cell states 
 
 - Smart-Seq2 (for now*)
 
-## Graphical Model (update)
+## Graphical Model 
 <img src="https://github.com/daklab/Leaflet/assets/23510936/3e147ba5-7ee8-47ae-b84c-5e99e0551acf" width="500">
 
 ## Installation
@@ -19,7 +19,10 @@ Leaflet is a Python module which currently runs on Python version 3.9 or higher.
 
 This will automatically install any missing package dependencies.
 
-Alternatively, Leaflet can be installed via conda (in the future). 
+Alternatively, Leaflet can be installed via conda (*in the near future*). 
+
+Citation: 
+----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## Running Leaflet Scripts (in the future will just be internal callable functions from module)
 
