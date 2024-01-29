@@ -21,8 +21,8 @@ This will automatically install any missing package dependencies.
 
 Alternatively, Leaflet can be installed via conda (*in the near future*). 
 
-Citation: 
-----------------------------------------------------------------------------------------------------------------------------------------------------------
+## If you use Leaflet, please cite: 
+https://www.biorxiv.org/content/10.1101/2023.10.17.562774v1 
 
 ## Running Leaflet Scripts (in the future will just be internal callable functions from module)
 
