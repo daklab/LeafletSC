@@ -34,7 +34,6 @@ from LeafletSC.utils import *
 from LeafletSC.clustering import *
 ```
 
-
 ## Requirements 
 Prior to using LeafletSC, please run **regtools** on your single-cell BAM files. Here is an example of what this might look like in a Snakefile:
 
