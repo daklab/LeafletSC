@@ -14,26 +14,42 @@ LeafletSC supports analysis from the following single-cell RNA sequencing platfo
 
 ## Getting Started
 
-LeafletSC is implemented in Python and requires Python version 3.9 or higher. You can easily install LeafletSC via PyPI using the following command:
+LeafletSC is implemented in Python and requires Python version 3.9 or higher. We recommend the following approach:
 
 ```bash
-pip install LeafletSC
+# create a conda environment with python 3.9 
+conda create -n "LeafletSC" python=3.9.15 ipython
+# activate environment 
+conda activate LeafletSC
+# install latest version of LeafletSC into this environment
+pip install LeafletSC==0.1.2
 ```
 
-Please also make sure you have regtools installed. Prior to using LeafletSC, please run regtools on your single-cell BAM files. Here is an example of what this might look like in a Snakefile:
+Once the package is installed, you can load it in python as follows:
+```python
+import LeafletSC 
+
+# or specific submodules 
+from LeafletSC.utils import *
+from LeafletSC.clustering import *
+```
+
+
+## Requirements 
+Prior to using LeafletSC, please run **regtools** on your single-cell BAM files. Here is an example of what this might look like in a Snakefile:
 
 ```Snakemake
 {params.regtools_path} junctions extract -a 6 -m 50 -M 500000 {input.bam_use} -o {output.juncs} -s XS -b {output.barcodes}
 # Combine junctions and cell barcodes
 paste --delimiters='\t' {output.juncs} {output.barcodes} > {output.juncswbarcodes}
 ```
-
-Once you have your junction files, you can try out the mixture model tutorial under [Tutorials](Tutorials/run_binomial_mixture_model.ipynb)
+- Once you have your junction files, you can try out the mixture model tutorial under [Tutorials](Tutorials/run_binomial_mixture_model.ipynb)
+- While optional, we recommend running LeafletSC intron clustering with a gtf file so that junctions can be first mapped to annotated splicing events. 
 
 ## Capabilities
 With LeafletSC, you can:
 
-- Infer cell states influenced by alternative splicing and identify significant splice junctions.
+- Infer cell states influenced by alternative splicing and identify differentially spliced regions.
 - Conduct differential splicing analysis between specific cell groups if cell identities are known.
 - Generate synthetic alternative splicing datasets for robust analysis testing.
 

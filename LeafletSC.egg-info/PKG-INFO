@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: LeafletSC
-Version: 0.1.1
+Version: 0.1.2
 Summary: Alternative splicing quantification in single cells with Leaflet
 Home-page: https://github.com/daklab/Leaflet
 Author: Karin Isaev, Columbia University and NYGC
@@ -9,7 +9,7 @@ License: MIT
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
-Requires-Python: >=3.6
+Requires-Python: >=3.9.15
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: gtfparse==1.3.0
@@ -65,7 +65,7 @@ With LeafletSC, you can:
 - Conduct differential splicing analysis between specific cell groups if cell identities are known.
 - Generate synthetic alternative splicing datasets for robust analysis testing.
 
-## If you use Leaflet, please cite our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v1)
+## If you use Leaflet, please cite our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3)
 
 ```
 @unpublished{Isaev2023-bf,
