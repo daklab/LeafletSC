@@ -37,7 +37,7 @@ With LeafletSC, you can:
 - Conduct differential splicing analysis between specific cell groups if cell identities are known.
 - Generate synthetic alternative splicing datasets for robust analysis testing.
 
-## If you use Leaflet, please cite our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v1)
+## If you use Leaflet, please cite our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3)
 
 ```
 @unpublished{Isaev2023-bf,
