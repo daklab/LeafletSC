@@ -7,7 +7,7 @@ def read_requirements():
 
 setup(
     name='LeafletSC',
-    version='0.1.5',
+    version='0.1.6',
     author='Karin Isaev, Columbia University and NYGC',
     author_email='ki2255@cumc.columbia.edu', 
     description='Alternative splicing quantification in single cells with Leaflet',
@@ -22,6 +22,6 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
     ],
-    python_requires='>=3.9.15',
+    python_requires='>=3.10',
     include_package_data=False, 
 )
