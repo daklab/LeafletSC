@@ -3,7 +3,7 @@
 LeafletSC is a binomial mixture model designed for the analysis of alternative splicing events in single-cell RNA sequencing data. The model facilitates understanding and quantifying splicing variability at the single-cell level. Below is the graphical model representation:
 
 <p align="center">
-  <img src="https://github.com/daklab/Leaflet/assets/23510936/3e147ba5-7ee8-47ae-b84c-5e99e0551acf" width="500">
+  <img src="![https://github.com/daklab/LeafletSC/](LeafletSC_graphical_abstract.png)" width="500">
 </p>
 
 ## Compatibility with sequencing platforms 
@@ -52,6 +52,12 @@ With LeafletSC, you can:
 - Conduct differential splicing analysis between specific cell groups if cell identities are known.
 - Generate synthetic alternative splicing datasets for robust analysis testing.
 
+## How does it work? 
+The full method can be found in our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3) while the graphical model is shown below:
+<p align="center">
+  <img src="https://github.com/daklab/Leaflet/assets/23510936/3e147ba5-7ee8-47ae-b84c-5e99e0551acf" width="500">
+</p>
+
 ## If you use Leaflet, please cite our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3)
 
 ```
@@ -72,3 +78,4 @@ With LeafletSC, you can:
 2. Add 10X/split-seq mode in addition to smart-seq2
 3. Extend framework to seurat/scanpy anndata objects
 4. Add notes on generative model and inference method
+5. Clean up dependencies 
