@@ -7,9 +7,9 @@ LeafletSC.egg-info/SOURCES.txt
 LeafletSC.egg-info/dependency_links.txt
 LeafletSC.egg-info/requires.txt
 LeafletSC.egg-info/top_level.txt
-LeafletSC/beta-binomial-mix/__init__.py
-LeafletSC/beta-binomial-mix/cellstate_consistency.py
-LeafletSC/beta-binomial-mix/model.py
+LeafletSC/beta_binomial_mix/__init__.py
+LeafletSC/beta_binomial_mix/cellstate_consistency.py
+LeafletSC/beta_binomial_mix/model.py
 LeafletSC/clustering/__init__.py
 LeafletSC/clustering/load_cluster_data.py
 LeafletSC/clustering/obtain_intron_clusters.py

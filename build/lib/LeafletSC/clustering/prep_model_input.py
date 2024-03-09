@@ -5,26 +5,34 @@ import numpy as np
 from tqdm import tqdm
 import concurrent.futures
 import time
+import tables  
 
-pd.options.mode.chained_assignment = None  # default='warn'
-
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning, module="pandas.core.strings")
+#pd.options.mode.chained_assignment = None  # default='warn'
+#import warnings
+#warnings.filterwarnings("ignore", category=FutureWarning, module="pandas.core.strings")
 
 parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, one file per line and no header')
 
 parser.add_argument('--intron_clusters', dest='intron_clusters',
                     help='path to the file that has the intron cluster events and junction information from running intron_clustering.py')
-parser.add_argument('--output_file', dest='output_file',
+
+parser.add_argument('--output_file', dest='output_file', 
+                    default="output_file",
                     help='how you want to name the output file, this will be the input for all Leaflet models')
+
 parser.add_argument('--has_genes', dest='has_genes',
+                    default="no",
                     help='yes if intron clustering was done with a gtf file, No if intron clustering was done in an annotation free manner')
-parser.add_argument('--chunk_size', dest='chunk_size', default=5000,
+
+parser.add_argument('--chunk_size', dest='chunk_size', 
+                    default=5000,
                     help='how many lines to read in at a time, default is 5000')
+
 parser.add_argument('--metadata', dest='metadata',
                     default=None,
                     help='path to the metadata file, if provided, the output file will have cell type information')
-args = parser.parse_args()
+
+args, unknown = parser.parse_known_args()
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #                      Utilities
@@ -125,17 +133,11 @@ def main(intron_clusters, output_file, has_genes, chunk_size, metadata):
     print("The number of total cells evaluated is " + str(len(all_cells))) 
 
     cells_types = clusts[["cell_type", "cell_id"]].drop_duplicates()
-    print(clusts.head())
     print("The number of cells per cell type is:")
     print(cells_types.groupby(["cell_type"])["cell_type"].count())
  
-    print("Ensuring that each cell-junction pair appears only once")
     summarized_data = summarized_data.drop_duplicates(subset=['cell_id', 'junction_id'], keep='last') #double check if this is still necessary
-
-    print("Merge cluster counts with summarized data")
-
     summarized_data = clust_cell_counts.merge(summarized_data)
-    print("Done merging cluster counts with summarized data")
 
     print(np.unique(summarized_data['cell_id'].values))
     summarized_data["junc_ratio"] = summarized_data["junc_count"] / summarized_data["Cluster_Counts"]
@@ -152,15 +154,18 @@ def main(intron_clusters, output_file, has_genes, chunk_size, metadata):
             # if "/" detected in name (cell_type) replace it with "_"
             if "/" in name:
                 name = name.replace("/", "_")
-            print("saving " + name + " as hdf file")
             group.to_hdf(output_file + "_" + name + ".h5", key='df', mode='w', complevel=9, complib='zlib')
+            print("You can find the resulting file at " + output_file + "_" + name + ".h5")
 
     if metadata is None:
         # save summarized_data as hdf file
         summarized_data.to_hdf(output_file + ".h5", key='df', mode='w', complevel=9, complib='zlib')    
+        print("You can find the resulting file at " + output_file + ".h5")
+
     print("Done generating input file for Leaflet model. This process took " + str(round(time.time() - start_time)) + " seconds")
 
 if __name__ == '__main__':
+
     intron_clusters=args.intron_clusters
     output_file=args.output_file
     has_genes=args.has_genes

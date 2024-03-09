@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: LeafletSC
-Version: 0.1.2
+Version: 0.1.4
 Summary: Alternative splicing quantification in single cells with Leaflet
 Home-page: https://github.com/daklab/Leaflet
 Author: Karin Isaev, Columbia University and NYGC
@@ -12,26 +12,27 @@ Classifier: Operating System :: OS Independent
 Requires-Python: >=3.9.15
 Description-Content-Type: text/markdown
 License-File: LICENSE
-Requires-Dist: gtfparse==1.3.0
-Requires-Dist: matplotlib==3.7.1
-Requires-Dist: numpy==1.23.5
-Requires-Dist: pandas==1.5.3
+Requires-Dist: gtfparse==2.5.0
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: pandas
 Requires-Dist: pyranges==0.0.129
-Requires-Dist: scanpy==1.9.8
-Requires-Dist: scikit_learn==1.2.2
-Requires-Dist: scipy==1.10.1
-Requires-Dist: seaborn==0.13.2
-Requires-Dist: setuptools==69.1.1
-Requires-Dist: torch==2.2.1
-Requires-Dist: tqdm==4.66.2
-Requires-Dist: umap_learn==0.5.3
+Requires-Dist: scanpy
+Requires-Dist: scikit_learn
+Requires-Dist: scipy
+Requires-Dist: seaborn
+Requires-Dist: setuptools
+Requires-Dist: torch==1.12.1
+Requires-Dist: tqdm
+Requires-Dist: umap
+Requires-Dist: tables==3.4.4
 
 # LeafletSC
 
 LeafletSC is a binomial mixture model designed for the analysis of alternative splicing events in single-cell RNA sequencing data. The model facilitates understanding and quantifying splicing variability at the single-cell level. Below is the graphical model representation:
 
 <p align="center">
-  <img src="https://github.com/daklab/Leaflet/assets/23510936/3e147ba5-7ee8-47ae-b84c-5e99e0551acf" width="500">
+  <img src="https://github.com/daklab/Leaflet/assets/23510936/2c7981fe-91ec-4830-b010-b74ac4140940">
 </p>
 
 ## Compatibility with sequencing platforms 
@@ -42,28 +43,49 @@ LeafletSC supports analysis from the following single-cell RNA sequencing platfo
 
 ## Getting Started
 
-LeafletSC is implemented in Python and requires Python version 3.9 or higher. You can easily install LeafletSC via PyPI using the following command:
+LeafletSC is implemented in Python and requires Python version 3.9 or higher. We recommend the following approach:
 
 ```bash
-pip install LeafletSC
+# create a conda environment with python 3.9 
+conda create -n "LeafletSC" python=3.9.15 ipython
+# activate environment 
+conda activate LeafletSC
+# install latest version of LeafletSC into this environment
+pip install LeafletSC==0.1.2
 ```
 
-Please also make sure you have regtools installed. Prior to using LeafletSC, please run regtools on your single-cell BAM files. Here is an example of what this might look like in a Snakefile:
+Once the package is installed, you can load it in python as follows:
+```python
+import LeafletSC 
+
+# or specific submodules 
+from LeafletSC.utils import *
+from LeafletSC.clustering import *
+```
+
+## Requirements 
+Prior to using LeafletSC, please run **regtools** on your single-cell BAM files. Here is an example of what this might look like in a Snakefile:
 
 ```Snakemake
 {params.regtools_path} junctions extract -a 6 -m 50 -M 500000 {input.bam_use} -o {output.juncs} -s XS -b {output.barcodes}
 # Combine junctions and cell barcodes
 paste --delimiters='\t' {output.juncs} {output.barcodes} > {output.juncswbarcodes}
 ```
-
-Once you have your junction files, you can try out the mixture model tutorial under [Tutorials](Tutorials/run_binomial_mixture_model.ipynb)
+- Once you have your junction files, you can try out the mixture model tutorial under [Tutorials](Tutorials/run_binomial_mixture_model.ipynb)
+- While optional, we recommend running LeafletSC intron clustering with a gtf file so that junctions can be first mapped to annotated splicing events. 
 
 ## Capabilities
 With LeafletSC, you can:
 
-- Infer cell states influenced by alternative splicing and identify significant splice junctions.
+- Infer cell states influenced by alternative splicing and identify differentially spliced regions.
 - Conduct differential splicing analysis between specific cell groups if cell identities are known.
 - Generate synthetic alternative splicing datasets for robust analysis testing.
+
+## How does it work? 
+The full method can be found in our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3) while the graphical model is shown below:
+<p align="center">
+  <img src="https://github.com/daklab/Leaflet/assets/23510936/3e147ba5-7ee8-47ae-b84c-5e99e0551acf">
+</p>
 
 ## If you use Leaflet, please cite our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3)
 
@@ -85,3 +107,4 @@ With LeafletSC, you can:
 2. Add 10X/split-seq mode in addition to smart-seq2
 3. Extend framework to seurat/scanpy anndata objects
 4. Add notes on generative model and inference method
+5. Clean up dependencies 
