@@ -55,7 +55,7 @@ With LeafletSC, you can:
 ## How does it work? 
 The full method can be found in our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3) while the graphical model is shown below:
 <p align="center">
-  <img src="https://github.com/daklab/Leaflet/assets/23510936/3e147ba5-7ee8-47ae-b84c-5e99e0551acf" width="500">
+  <img src="https://github.com/daklab/Leaflet/assets/23510936/3e147ba5-7ee8-47ae-b84c-5e99e0551acf">
 </p>
 
 ## If you use Leaflet, please cite our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3)
