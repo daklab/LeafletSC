@@ -3,7 +3,7 @@
 LeafletSC is a binomial mixture model designed for the analysis of alternative splicing events in single-cell RNA sequencing data. The model facilitates understanding and quantifying splicing variability at the single-cell level. Below is the graphical model representation:
 
 <p align="center">
-  <img src="![https://github.com/daklab/LeafletSC/](LeafletSC_graphical_abstract.png)" width="500">
+  <img src="https://github.com/daklab/Leaflet/assets/23510936/2c7981fe-91ec-4830-b010-b74ac4140940">
 </p>
 
 ## Compatibility with sequencing platforms 
