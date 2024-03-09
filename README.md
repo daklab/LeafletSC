@@ -14,15 +14,15 @@ LeafletSC supports analysis from the following single-cell RNA sequencing platfo
 
 ## Getting Started
 
-LeafletSC is implemented in Python and requires Python version 3.9 or higher. We recommend the following approach:
+LeafletSC is implemented in Python and requires Python version 3.10 (3.11 has not been tested yet). We recommend the following approach:
 
 ```bash
-# create a conda environment with python 3.9 
-conda create -n "LeafletSC" python=3.9.15 ipython
+# create a conda environment with python 3.10 
+conda create -n "LeafletSC" python=3.10 ipython
 # activate environment 
 conda activate LeafletSC
 # install latest version of LeafletSC into this environment
-pip install LeafletSC==0.1.2
+pip install LeafletSC==0.1.6
 ```
 
 Once the package is installed, you can load it in python as follows:
