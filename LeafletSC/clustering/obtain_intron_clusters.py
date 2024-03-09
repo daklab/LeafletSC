@@ -74,13 +74,8 @@ parser.add_argument('--filter_low_juncratios_inclust', dest='filter_low_juncrati
                     default="no",
                     help='yes if want to remove lowly used junctions in clusters, default is no')
 
-parser.add_argument('--strict_filter', dest='strict_filter',
-                    default=True,
-                    help='default is True, this means that only clusters with less junctions that the mean \
-                        junction count per cluster is included. This is meant to remove very complex \
-                        splicing events that might be hard to make sense of in the single cell context especially.')
-
-args = parser.parse_args()
+#args = parser.parse_args()
+args = parser.parse_args(args=[])
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #                      Utilities
@@ -89,7 +84,6 @@ args = parser.parse_args()
 def process_gtf(gtf_file): #make this into a seperate script that processes the gtf file into gr object that can be used in the main scriptas input 
 
     print("The gtf file you provided is " + gtf_file)
-    print("Now reading gtf file using gtfparse")
     print("This step may take a while depending on the size of your gtf file")
 
     # calculate how long it takes to read gtf_file and report it 
@@ -129,9 +123,11 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     gtf_exons_gr = gtf_exons_gr.drop_duplicate_positions(strand=True) # Why are so many gone after this? 
 
     # Print the number of unique exons, transcript ids, and gene ids
+    print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     print("The number of unique exons is " + str(len(gtf_exons_gr.exon_id.unique())))
     print("The number of unique transcript ids is " + str(len(gtf_exons_gr.transcript_id.unique())))
     print("The number of unique gene ids is " + str(len(gtf_exons_gr.gene_id.unique())))
+    print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     return(gtf_exons_gr)
 
 def filter_junctions_by_shared_splice_sites(df):
@@ -153,7 +149,7 @@ def filter_junctions_by_shared_splice_sites(df):
 #        Run analysis and obtain intron clusters
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, strict_filter, junc_suffix, min_num_cells_wjunc, filter_low_juncratios_inclust):
+def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, junc_suffix, min_num_cells_wjunc, filter_low_juncratios_inclust):
     
     #1. Check format of junc_files and convert to list if necessary
     # Can either be a list of folders with junction files or a single folder with junction files
@@ -170,10 +166,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     # 3. Process each path
     for junc_path in junc_files:
         
-        # make sure junc_path has "/" at the end
-        #if not junc_path.endswith("/"):
-        #    junc_path = junc_path + "/"
-        
         junc_path = Path(junc_path)
         print(f"Reading in junction files from {junc_path}")
         
@@ -183,11 +175,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
             print(f"No junction files found in {junc_path} with suffix {junc_suffix}")
             continue
 
-        #junc_files_in_path = glob.glob(junc_path + "*" + junc_suffix)  # Adjusted to correctly form the glob pattern
-        #if not junc_files_in_path:
-        #    print(f"No junction files found in {junc_path} with suffix {junc_suffix}")
-        #    continue
-        
         print(f"The number of regtools junction files to be processed is {len(junc_files_in_path)}")
 
         files_not_read = []
@@ -197,14 +184,14 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
             try:
                 juncs = pd.read_csv(junc_file, sep="\t", header=None)
                 juncs['file_name'] = junc_file  # Add the file name as a new column
-                #juncs['cell_type'] = junc_file.split("/")[-1]
                 juncs['cell_type'] = junc_file
                 all_juncs_list.append(juncs)  # Append the DataFrame to the list
             except Exception as e:
                 print(f"Could not read in {junc_file}: {e}")  
                 files_not_read.append(junc_file)
 
-    print("The total number of files that could not be read is " + str(len(files_not_read)) + " as these had no junctions")
+    if(len(files_not_read) > 0):
+        print("The total number of files that could not be read is " + str(len(files_not_read)) + " as these had no junctions")
 
     # 5. Concatenate all DataFrames into a single DataFrame
     all_juncs = pd.concat(all_juncs_list, ignore_index=True) if all_juncs_list else pd.DataFrame()
@@ -247,7 +234,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     all_juncs["intron_length"] = all_juncs["chromEnd"] - all_juncs["chromStart"]
     mask = (all_juncs["intron_length"] >= min_intron) & (all_juncs["intron_length"] <= max_intron)
     all_juncs = all_juncs[mask]
-    print("Filtering based on intron length")
 
     # Filter for 'chrom' column to handle "chr" prefix
     all_juncs = all_juncs.copy()
@@ -264,7 +250,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     all_juncs['junction_id'] = all_juncs['chrom'] + '_' + all_juncs['chromStart'].astype(str) + '_' + all_juncs['chromEnd'].astype(str)
     
     # Get total score for each junction and merge with all_juncs with new column "total_counts"
-    
     all_juncs = all_juncs.groupby('junction_id').agg({'score': 'sum'}).reset_index().merge(all_juncs, on='junction_id', how='left')
 
     # rename score_x and score_y to total_junc_counts and score 
@@ -319,7 +304,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
 
     # 9. if singleton is False, remove clusters with only one junction
     if singleton == False:
-        print(clusters.Count.value_counts())
         clusters = clusters[clusters.Count > 1]
         print("The number of clusters after removing singletons is " + str(len(clusters.Cluster.unique())))
 
@@ -349,7 +333,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
 
     # check if any clusters are singletons now and remove if have singleton == False
     if singleton == False:
-        print(filtered_clusters_df.Count.value_counts())
         filtered_clusters_df = filtered_clusters_df[filtered_clusters_df.Count > 1]
         print("The number of clusters after removing singletons is " + str(len(filtered_clusters_df.Cluster.unique())))
 
@@ -411,11 +394,6 @@ if __name__ == '__main__':
         singleton=True
     else:
         singleton=False
-    # ensure strict_filter is boolean
-    if args.strict_filter == "True":
-        strict_filter=True
-    else:
-        strict_filter=False
     
     # print out all user defined arguments that were chosen 
     print("The following arguments were chosen:" , flush=True)
@@ -431,7 +409,6 @@ if __name__ == '__main__':
     print("junc_suffix: " + junc_suffix, flush=True)
     print("min_num_cells_wjunc: " + str(min_num_cells_wjunc), flush=True)
     print("singleton: " + str(singleton), flush=True)
-    print("strict_filter: " + str(strict_filter), flush=True)
     print("filter_low_juncratios_inclust: " + (filter_low_juncratios_inclust), flush=True)
 
-    main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, strict_filter, junc_suffix, min_num_cells_wjunc, filter_low_juncratios_inclust)
+    main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, junc_suffix, min_num_cells_wjunc, filter_low_juncratios_inclust)
