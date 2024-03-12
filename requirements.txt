@@ -12,5 +12,3 @@ torch
 tqdm
 umap
 tables
-concurrent
-polars 
