@@ -72,6 +72,14 @@ The full method can be found in our [paper](https://www.biorxiv.org/content/10.1
 }
 ```
 
+### Potential errors:
+
+If you have any errors with the package Polars, please ensure you install polars-lts-cpu:
+
+```
+pip install polars-lts-cpu
+```
+
 ### To-do: 
 
 1. Add documentation and some tests for how to run the simulation code 

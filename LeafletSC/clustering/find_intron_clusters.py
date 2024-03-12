@@ -302,6 +302,9 @@ def mapping_juncs_exons(juncs_gr, gtf_exons_gr, singletons):
         return juncs_gr, juncs_coords_unique, clusters
 
 def visualize_junctions(dat, junc_id):
+
+    # 
+
     # Filter data for the specific junction ID
     dat = dat[dat.Cluster == dat[dat.junction_id == junc_id].Cluster.values[0]]
 
@@ -438,7 +441,7 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     junc_scores_all = refine_clusters(clust_info)
     junc_scores_all = junc_scores_all[junc_scores_all.min_usage < threshold_inc]
     # add 5ss and 3ss usatio of each junction to all_juncs
-    all_juncs = all_juncs.merge(clust_info[['junction_id', 'total_5ss_counts', 'total_3ss_counts', "5SS_usage", "3SS_usage"]], on='junction_id')
+    all_juncs = all_juncs.merge(junc_scores_all[['junction_id', 'total_5ss_counts', 'total_3ss_counts', "5SS_usage", "3SS_usage"]], on='junction_id')
 
     # remove junctions that are in junc_scores_all from juncs_gr, clusters, all_juncs and juncs_coords_unique
     juncs_gr = juncs_gr[~juncs_gr.junction_id.isin(junc_scores_all.junction_id)]
