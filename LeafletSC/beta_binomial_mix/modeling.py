@@ -325,3 +325,6 @@ def log_beta(a, b):
 
 def score(a, b):
     return log_beta(a,b).sum() - log_beta(a.sum(), b.sum())
+
+# Add functionality for getting score q-value to measure significance of differential splicing
+

@@ -57,3 +57,6 @@ def quick_junc_plot(junc, simple_data, gene_name=None, cell_types=None):
     # set x axis label to "Junction Usage Ratio (PSI)"
     plt.xlabel("Junction Usage Ratio (PSI)")
     plt.show()
+
+# Add visualization for seeing junction in a specific intron cluster relative to a gene and 
+# how much each junciton is used in each cell type
