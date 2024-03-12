@@ -22,7 +22,7 @@ conda create -n "LeafletSC" python=3.10 ipython
 # activate environment 
 conda activate LeafletSC
 # install latest version of LeafletSC into this environment
-pip install LeafletSC==0.1.6
+pip install LeafletSC
 ```
 
 Once the package is installed, you can load it in python as follows:
@@ -42,7 +42,7 @@ Prior to using LeafletSC, please run **regtools** on your single-cell BAM files.
 # Combine junctions and cell barcodes
 paste --delimiters='\t' {output.juncs} {output.barcodes} > {output.juncswbarcodes}
 ```
-- Once you have your junction files, you can try out the mixture model tutorial under [Tutorials](Tutorials/run_binomial_mixture_model.ipynb)
+- Once you have your junction files, you can try out the mixture model tutorial under [Tutorials](Tutorials/01_run_intron_clustering.ipynb)
 - While optional, we recommend running LeafletSC intron clustering with a gtf file so that junctions can be first mapped to annotated splicing events. 
 
 ## Capabilities

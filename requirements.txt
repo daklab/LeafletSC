@@ -12,3 +12,4 @@ torch
 tqdm
 umap
 tables
+polars-lts-cpu

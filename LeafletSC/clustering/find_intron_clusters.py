@@ -96,7 +96,7 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     """
 
     print("The gtf file you provided is " + gtf_file)
-    print("This step may take a while depending on the size of your gtf file")
+    print("Reading the gtf may take a while depending on the size of your gtf file")
 
     # calculate how long it takes to read gtf_file and report it 
     start_time = time.time()
@@ -461,7 +461,7 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
         print("Clustering intron splicing events by coordinates")
         juncs_coords_unique = juncs_gr[['Chromosome', 'Start', 'End', 'Strand', 'junction_id', 'counts_total']].drop_duplicate_positions()
         clusters = juncs_coords_unique.cluster(slack=-1, count=True)
-        print("The number of clusters after clustering by coordinates is " + str(clusters.Cluster.max()))
+        print("The number of clusters after clustering by coordinates is " + str(len(clusters.Cluster.unique())))
         if singleton == False:
             clusters = clusters[clusters.Count > 1]
             # update juncs_gr to include only clusters that are in clusters
