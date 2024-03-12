@@ -153,76 +153,6 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     return(gtf_exons_gr)
 
-def preprocess_data(dataset):
-    """
-    Preprocess the junction data.
-
-    Parameters:
-    - dataset (pd.DataFrame): Input DataFrame.
-
-    Returns:
-    - juncs_dat_summ (pd.DataFrame): Preprocessed DataFrame.
-    """
-        
-    # Assuming 'score' is a column in 'dataset' that you want to summarize
-    juncs_dat_summ = dataset.groupby(["chrom", "chromStart", "chromEnd", "junction_id"], as_index=False).score.sum()
-    juncs_dat_summ = juncs_dat_summ.merge(
-        juncs_dat_summ.groupby(['chromStart'])['score'].sum().reset_index().rename(columns={'score': 'total_5SS_counts'}),
-        on='chromStart'
-    ).merge(
-        juncs_dat_summ.groupby(['chromEnd'])['score'].sum().reset_index().rename(columns={'score': 'total_3SS_counts'}),
-        on='chromEnd'
-    )
-    juncs_dat_summ['5SS_usage'] = juncs_dat_summ['score'] / juncs_dat_summ['total_5SS_counts']
-    juncs_dat_summ['3SS_usage'] = juncs_dat_summ['score'] / juncs_dat_summ['total_3SS_counts']
-    return juncs_dat_summ
-
-def refine_cluster(cluster, clusters_df, preprocessed_data):
-    """
-    Refine a single cluster.
-
-    Parameters:
-    - cluster (int): Cluster ID.
-    - clusters_df (pd.DataFrame): DataFrame of clusters.
-    - preprocessed_data (pd.DataFrame): Preprocessed data.
-
-    Returns:
-    - List: Cluster details.
-    """
-    clust_dat = clusters_df[clusters_df.Cluster == cluster]
-    juncs_dat_all = preprocessed_data[preprocessed_data.junction_id.isin(clust_dat.junction_id)]
-    ss_score = juncs_dat_all[["5SS_usage", "3SS_usage"]].min().min()
-    junc = juncs_dat_all[(juncs_dat_all["5SS_usage"] == ss_score) | (juncs_dat_all["3SS_usage"] == ss_score)].junction_id.values[0]
-    return [cluster, junc, ss_score]
-
-def refine_clusters(clusters, clusters_df, dataset):
-    """
-    Refine multiple clusters.
-
-    Parameters:
-    - clusters (list): List of cluster IDs.
-    - clusters_df (pd.DataFrame): DataFrame of clusters.
-    - dataset (pd.DataFrame): Input DataFrame.
-
-    Returns:
-    - list: List of refined clusters.
-    """
-        
-    preprocessed_data = preprocess_data(dataset)
-    all_juncs_scores = []
-    # start time 
-    start_time = time.time()
-    
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        results = list(executor.map(lambda x: refine_cluster(x, clusters_df, preprocessed_data), clusters))
-    for result in results:
-        all_juncs_scores.append(result)
-
-    # end time
-    end_time = time.time()
-    print("Refining clusters took " + str(round((end_time-start_time), 2)) + " seconds")
-    return all_juncs_scores
-
 def filter_junctions_by_shared_splice_sites(df):
     """
     Filter junctions by shared splice sites.
@@ -356,17 +286,17 @@ def mapping_juncs_exons(juncs_gr, gtf_exons_gr, singletons):
     print("Clustering intron splicing events by gene_id")
     juncs_coords_unique = juncs_gr[['Chromosome', 'Start', 'End', 'Strand', 'junction_id', 'gene_id']].drop_duplicate_positions()
     clusters = juncs_coords_unique.cluster(by="gene_id", slack=-1, count=True)
-    print("The number of clusters after clustering by gene_id is " + str(clusters.Cluster.max())) 
+    print("The number of clusters after clustering by gene_id is " + str(len(clusters.Cluster.unique()))) 
 
     if singletons == False:
         # remove singletons 
         clusters = clusters[clusters.Cluster > 1]
-        print("The number of clusters after removing singletons is " + str(clusters.Cluster.max()))
         # update juncs_gr to only include junctions that are part of clusters
         juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters.junction_id)]
         # update juncs_coords_unique to only include junctions that are part of clusters
         juncs_coords_unique = juncs_coords_unique[juncs_coords_unique.junction_id.isin(clusters.junction_id)]
         print("The number of junctions after removing singletons is " + str(len(juncs_coords_unique.junction_id.unique())))
+        print("The number of clusters after removing singletons is " + str(len(clusters.Cluster.unique()))) 
         return juncs_gr, juncs_coords_unique, clusters
     else:
         return juncs_gr, juncs_coords_unique, clusters
@@ -399,6 +329,24 @@ def visualize_junctions(dat, junc_id):
     print("The junction of interest is " + junc_id)
     plt.show()
 
+def refine_clusters(clust_info):
+    # for all start positions that are same for each cluster get the sum counts_total
+    clust_info_5ss = clust_info.groupby(['Cluster', 'Start']).agg({'counts_total': 'sum'}).reset_index()
+    clust_info_3_ss = clust_info.groupby(['Cluster', 'End']).agg({'counts_total': 'sum'}).reset_index()
+    # rename columns in 5ss to be total 5ss counts
+    clust_info_5ss.rename(columns={'counts_total': 'total_5ss_counts'}, inplace=True)
+    clust_info_3_ss.rename(columns={'counts_total': 'total_3ss_counts'}, inplace=True)
+    # remove Start and End column from each
+    clust_info = clust_info.merge(clust_info_5ss, on=['Cluster', 'Start'])
+    clust_info = clust_info.merge(clust_info_3_ss, on=['Cluster', 'End'])
+
+    # give each junction a 5ss fraction and 3ss fraction and then add column counts_total 
+    clust_info['5SS_usage'] = clust_info['counts_total'] / clust_info['total_5ss_counts']
+    clust_info['3SS_usage'] = clust_info['counts_total'] / clust_info['total_3ss_counts']
+    clust_info["min_usage"] = clust_info[["5SS_usage", "3SS_usage"]].min(axis=1)
+    print("Done refining clusters!")
+    return(clust_info)
+
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #        Run analysis and obtain intron clusters
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -415,6 +363,8 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
         junc_files = [junc_files]
 
     #2. run read_junction_files function to read in all junction files
+    print(f"Loading files obtained from {sequencing_type} sequencing")
+
     all_juncs = read_junction_files(junc_files, junc_suffix)
 
     #3. If gtf_file is not empty, read it in and process it
@@ -436,7 +386,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     if sequencing_type == "single_cell":
         col_names += ["num_cells_wjunc", "cell_readcounts"]
     col_names += ["file_name", "cell_type"]
-    print(f"Loading files obtained from {sequencing_type} sequencing")
     
     # 6. Clean up junctions and filter for intron length
     all_juncs = clean_up_juncs(all_juncs, col_names, min_intron, max_intron)
@@ -482,9 +431,15 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     all_juncs = all_juncs[all_juncs.junction_id.isin(juncs_coords_unique.junction_id)]
 
     # 11. Refine intron clusters based on splice sites found in them -> remove low confidence junctions basically a filter to see which junctions to keep
-    all_juncs_scores = refine_clusters(clusters.Cluster.unique(), clusters, all_juncs)
-    junc_scores_all = pd.DataFrame(all_juncs_scores, columns=["Cluster", "junction_id", "junction_score"])
-    junc_scores_all = junc_scores_all[junc_scores_all.junction_score < threshold_inc]
+    print("Refining intron clusters to account for junction usage ratio threshold...")
+    juncs_counts = juncs_gr.df[['junction_id', 'Start', 'End', 'counts_total']].drop_duplicates()
+    clust_info = clusters.df[['Cluster', 'junction_id']].drop_duplicates()
+    clust_info = clust_info.merge(juncs_counts)
+    junc_scores_all = refine_clusters(clust_info)
+    junc_scores_all = junc_scores_all[junc_scores_all.min_usage < threshold_inc]
+    # add 5ss and 3ss usatio of each junction to all_juncs
+    all_juncs = all_juncs.merge(clust_info[['junction_id', 'total_5ss_counts', 'total_3ss_counts', "5SS_usage", "3SS_usage"]], on='junction_id')
+
     # remove junctions that are in junc_scores_all from juncs_gr, clusters, all_juncs and juncs_coords_unique
     juncs_gr = juncs_gr[~juncs_gr.junction_id.isin(junc_scores_all.junction_id)]
     clusters = clusters[~clusters.junction_id.isin(junc_scores_all.junction_id)]
@@ -527,6 +482,9 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     
      # merge juncs_gr with corresponding cluster id
     all_juncs_df = all_juncs.merge(clusts_unique, how="left")
+
+    # print the column names of all_juncs_df
+    print("The columns in all_juncs_df are " + str(all_juncs_df.columns))
 
     # get final list of junction coordinates and save to bed file for visualization
     juncs_gr = juncs_gr[["Chromosome", "Start", "End", "Strand", "junction_id"]]

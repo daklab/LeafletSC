@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: LeafletSC
-Version: 0.1.8
+Version: 0.2.11
 Summary: Alternative splicing quantification in single cells with Leaflet
 Home-page: https://github.com/daklab/Leaflet
 Author: Karin Isaev, Columbia University and NYGC
@@ -26,10 +26,11 @@ Requires-Dist: torch
 Requires-Dist: tqdm
 Requires-Dist: umap
 Requires-Dist: tables
+Requires-Dist: polars-lts-cpu
 
 # LeafletSC
 
-LeafletSC is a binomial mixture model designed for the analysis of alternative splicing events in single-cell RNA sequencing data. The model facilitates understanding and quantifying splicing variability at the single-cell level. Below is the graphical model representation:
+LeafletSC is a binomial mixture model designed for the analysis of alternative splicing events in single-cell RNA sequencing data. The model facilitates understanding and quantifying splicing variability at the single-cell level. Below is the graphical abstract of our approach:
 
 <p align="center">
   <img src="https://github.com/daklab/Leaflet/assets/23510936/2c7981fe-91ec-4830-b010-b74ac4140940">
@@ -51,7 +52,7 @@ conda create -n "LeafletSC" python=3.10 ipython
 # activate environment 
 conda activate LeafletSC
 # install latest version of LeafletSC into this environment
-pip install LeafletSC==0.1.6
+pip install LeafletSC
 ```
 
 Once the package is installed, you can load it in python as follows:
@@ -71,7 +72,7 @@ Prior to using LeafletSC, please run **regtools** on your single-cell BAM files.
 # Combine junctions and cell barcodes
 paste --delimiters='\t' {output.juncs} {output.barcodes} > {output.juncswbarcodes}
 ```
-- Once you have your junction files, you can try out the mixture model tutorial under [Tutorials](Tutorials/run_binomial_mixture_model.ipynb)
+- Once you have your junction files, you can try out the mixture model tutorial under [Tutorials](Tutorials/01_run_intron_clustering.ipynb)
 - While optional, we recommend running LeafletSC intron clustering with a gtf file so that junctions can be first mapped to annotated splicing events. 
 
 ## Capabilities
