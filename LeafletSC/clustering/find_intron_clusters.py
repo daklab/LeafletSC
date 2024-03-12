@@ -439,14 +439,14 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     clust_info = clusters.df[['Cluster', 'junction_id']].drop_duplicates()
     clust_info = clust_info.merge(juncs_counts)
     junc_scores_all = refine_clusters(clust_info)
-    junc_scores_all = junc_scores_all[junc_scores_all.min_usage < threshold_inc]
+    junc_scores_all = junc_scores_all[junc_scores_all.min_usage >= threshold_inc]
     # add 5ss and 3ss usatio of each junction to all_juncs
     all_juncs = all_juncs.merge(junc_scores_all[['junction_id', 'total_5ss_counts', 'total_3ss_counts', "5SS_usage", "3SS_usage"]], on='junction_id')
 
     # remove junctions that are in junc_scores_all from juncs_gr, clusters, all_juncs and juncs_coords_unique
-    juncs_gr = juncs_gr[~juncs_gr.junction_id.isin(junc_scores_all.junction_id)]
-    clusters = clusters[~clusters.junction_id.isin(junc_scores_all.junction_id)]
-    all_juncs = all_juncs[~all_juncs.junction_id.isin(junc_scores_all.junction_id)]
+    juncs_gr = juncs_gr[juncs_gr.junction_id.isin(junc_scores_all.junction_id)]
+    clusters = clusters[clusters.junction_id.isin(junc_scores_all.junction_id)]
+    all_juncs = all_juncs[all_juncs.junction_id.isin(junc_scores_all.junction_id)]
     juncs_coords_unique = juncs_coords_unique[~juncs_coords_unique.junction_id.isin(junc_scores_all.junction_id)]
     print("The number of clusters after removing low confidence junctions is " + str(len(clusters.Cluster.unique())))
 
