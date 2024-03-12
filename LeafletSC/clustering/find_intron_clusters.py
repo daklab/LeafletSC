@@ -447,7 +447,7 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     juncs_gr = juncs_gr[juncs_gr.junction_id.isin(junc_scores_all.junction_id)]
     clusters = clusters[clusters.junction_id.isin(junc_scores_all.junction_id)]
     all_juncs = all_juncs[all_juncs.junction_id.isin(junc_scores_all.junction_id)]
-    juncs_coords_unique = juncs_coords_unique[~juncs_coords_unique.junction_id.isin(junc_scores_all.junction_id)]
+    juncs_coords_unique = juncs_coords_unique[juncs_coords_unique.junction_id.isin(junc_scores_all.junction_id)]
     print("The number of clusters after removing low confidence junctions is " + str(len(clusters.Cluster.unique())))
 
     # 12. given junctions that remain, see if need to recluster introns (low confidence junctions removed)
@@ -464,10 +464,10 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     # update juncs_gr to only include junctions that are part of clusters and update juncs_coords_unique to only include junctions that are part of clusters
     juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters.junction_id)]
     juncs_coords_unique = juncs_coords_unique[juncs_coords_unique.junction_id.isin(clusters.junction_id)]
+    print(all_juncs.head())
     # update all_juncs 
-    all_juncs = all_juncs.df
     print(type(all_juncs))
-    all_juncs = all_juncs[all_juncs.junction_id.isin(juncs_coords_unique.junction_id)]
+#    all_juncs = all_juncs[all_juncs.junction_id.isin(juncs_coords_unique.junction_id)]
     print("The number of clusters after removing singletons is " + str(len(clusters.Cluster.unique())))
 
     # 14. After re-clustering above, need to confirm that junctions still share splice sites  
