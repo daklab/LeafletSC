@@ -465,8 +465,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters.junction_id)]
     juncs_coords_unique = juncs_coords_unique[juncs_coords_unique.junction_id.isin(clusters.junction_id)]
     # update all_juncs 
-    all_juncs = all_juncs.df
-    print(type(all_juncs))
     all_juncs = all_juncs[all_juncs.junction_id.isin(juncs_coords_unique.junction_id)]
     print("The number of clusters after removing singletons is " + str(len(clusters.Cluster.unique())))
 

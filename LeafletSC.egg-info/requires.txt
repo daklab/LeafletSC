@@ -1,0 +1,15 @@
+gtfparse==2.5.0
+matplotlib
+numpy
+pandas
+pyranges==0.0.129
+scanpy
+scikit_learn
+scipy
+seaborn
+setuptools
+torch
+tqdm
+umap
+tables
+polars-lts-cpu
