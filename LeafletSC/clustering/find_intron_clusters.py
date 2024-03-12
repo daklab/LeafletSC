@@ -291,6 +291,7 @@ def read_junction_files(junc_files, junc_suffix):
     return all_juncs
 
 def clean_up_juncs(all_juncs, col_names, min_intron, max_intron):
+    
     # Apply column names to the DataFrame
     all_juncs.columns = col_names
     
@@ -319,6 +320,13 @@ def clean_up_juncs(all_juncs, col_names, min_intron, max_intron):
     
     # Add 'junction_id' column
     all_juncs['junction_id'] = all_juncs['chrom'] + '_' + all_juncs['chromStart'].astype(str) + '_' + all_juncs['chromEnd'].astype(str)
+    
+    # Get total score for each junction and merge with all_juncs with new column "total_counts"
+    all_juncs = all_juncs.groupby('junction_id').agg({'score': 'sum'}).reset_index().merge(all_juncs, on='junction_id', how='left')
+
+    # rename score_x and score_y to total_junc_counts and score 
+    all_juncs.rename(columns={'score_x': 'counts_total', 'score_y': 'score'}, inplace=True)
+
     return(all_juncs)
 
 def mapping_juncs_exons(juncs_gr, gtf_exons_gr, singletons):
