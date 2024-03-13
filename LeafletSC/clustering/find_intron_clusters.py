@@ -96,7 +96,7 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     """
 
     print("The gtf file you provided is " + gtf_file)
-    print("Reading the gtf may take a while depending on the size of your gtf file")
+    print("Reading the gtf may take a minute...")
 
     # calculate how long it takes to read gtf_file and report it 
     start_time = time.time()
@@ -146,7 +146,6 @@ def process_gtf(gtf_file): #make this into a seperate script that processes the 
     gtf_exons_gr = gtf_exons_gr.drop_duplicate_positions(strand=True) # Why are so many gone after this? 
 
     # Print the number of unique exons, transcript ids, and gene ids
-    print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     print("The number of unique exons is " + str(len(gtf_exons_gr.exon_id.unique())))
     print("The number of unique transcript ids is " + str(len(gtf_exons_gr.transcript_id.unique())))
     print("The number of unique gene ids is " + str(len(gtf_exons_gr.gene_id.unique())))
@@ -301,16 +300,18 @@ def mapping_juncs_exons(juncs_gr, gtf_exons_gr, singletons):
     else:
         return juncs_gr, juncs_coords_unique, clusters
 
-def visualize_junctions(dat, junc_id):
+def basepair_to_kilobase(bp):
+    return bp / 1000  # Convert base pairs to kilobases
 
-    # 
+def visualize_junctions(dat, junc_id):
 
     # Filter data for the specific junction ID
     dat = dat[dat.Cluster == dat[dat.junction_id == junc_id].Cluster.values[0]]
 
     # Get junctions
-    juncs = dat[["chromStart", "chromEnd", "strand"]]
+    juncs = dat[["chrom", "chromStart", "chromEnd", "strand", "intron_length", "counts_total", "thickStart", "thickEnd"]]
     juncs = juncs.drop_duplicates()
+    juncs["junc_usage_ratio"] = dat["counts_total"] / dat["counts_total"].sum()
 
     # Sort junctions based on strand
     if juncs.strand.values[0] == "+":
@@ -318,17 +319,27 @@ def visualize_junctions(dat, junc_id):
     else:
         juncs = juncs.sort_values("chromEnd", ascending=False)
 
+    # Convert genomic coordinates to kilobases
+    juncs["chromStart_kb"] = basepair_to_kilobase(juncs["chromStart"])
+    juncs["chromEnd_kb"] = basepair_to_kilobase(juncs["chromEnd"])
+    print(juncs)
+    # Create colormap
+    cmap = plt.get_cmap('plasma')
+
     # Create the plot
     fig, ax = plt.subplots(figsize=(10, len(juncs) * 0.5))
 
-    # Plot junctions as lines
+    # Plot junctions as lines with varying colors based on usage ratio
     for i, (_, junc) in enumerate(juncs.iterrows()):
-        ax.plot([junc["chromStart"], junc["chromEnd"]], [i, i], color="red")
+        color = cmap(junc["junc_usage_ratio"])
+        ax.plot([junc["chromStart_kb"], junc["chromEnd_kb"]], [i, i], color=color)
+        ax.text(junc["chromEnd_kb"], i, f'{junc["junc_usage_ratio"]:.2f}', verticalalignment='center', fontsize=8, color=color)
 
-    # Set labels and title
-    ax.set_xlabel("Genomic Position")
+    # Set labels and title 
+    ax.set_xlabel("Genomic Position on chr" + juncs.chrom.values[0] + " (" + juncs.strand.values[0] + ") [Kilobases]")
     ax.set_yticks(list(range(len(juncs))))
     ax.set_title(f"Visualization of Junctions in Cluster {dat.Cluster.values[0]} in the Gene {dat.gene_id.values[0]}")
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: '{:.0f}'.format(x)))  # Disable scientific notation
     print("The junction of interest is " + junc_id)
     plt.show()
 
@@ -464,10 +475,6 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     # update juncs_gr to only include junctions that are part of clusters and update juncs_coords_unique to only include junctions that are part of clusters
     juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters.junction_id)]
     juncs_coords_unique = juncs_coords_unique[juncs_coords_unique.junction_id.isin(clusters.junction_id)]
-    print(all_juncs.head())
-    # update all_juncs 
-    print(type(all_juncs))
-#    all_juncs = all_juncs[all_juncs.junction_id.isin(juncs_coords_unique.junction_id)]
     print("The number of clusters after removing singletons is " + str(len(clusters.Cluster.unique())))
 
     # 14. After re-clustering above, need to confirm that junctions still share splice sites  
@@ -482,20 +489,21 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
 
     if gtf_file is not None:
         clusts_unique = clusters.df[["Cluster", "junction_id", "gene_id", "Count"]].drop_duplicates()
+        juncs_gr = juncs_gr[["Chromosome", "Start", "End", "Strand", "junction_id", "Start_b", "End_b", "gene_id", "gene_name", "transcript_id", "exon_id"]]
+        juncs_gr = juncs_gr.drop_duplicate_positions()
+        juncs_gr.to_bed(junc_bed_file, chain=True) #add option to add prefix to file name
+        print("Saved final list of junction coordinates to " + junc_bed_file)
     else:
         clusts_unique = clusters.df[["Cluster", "junction_id", "Count"]].drop_duplicates()
+        juncs_gr = juncs_gr[["Chromosome", "Start", "End", "Strand", "junction_id"]]
+        juncs_gr = juncs_gr.drop_duplicate_positions()
+        juncs_gr.to_bed(junc_bed_file, chain=True)
+        print("Saved final list of junction coordinates to " + junc_bed_file)
     
      # merge juncs_gr with corresponding cluster id
     all_juncs_df = all_juncs.merge(clusts_unique, how="left")
 
-    # print the column names of all_juncs_df
-    print("The columns in all_juncs_df are " + str(all_juncs_df.columns))
-
     # get final list of junction coordinates and save to bed file for visualization
-    juncs_gr = juncs_gr[["Chromosome", "Start", "End", "Strand", "junction_id"]]
-    juncs_gr = juncs_gr.drop_duplicate_positions()
-    juncs_gr.to_bed(junc_bed_file, chain=True) #add option to add prefix to file name
-
     print("The number of clusters to be finally evaluated is " + str(len(all_juncs_df.Cluster.unique()))) 
     print("The number of junctions to be finally evaluated is " + str(len(all_juncs_df.junction_id.unique())))
 
