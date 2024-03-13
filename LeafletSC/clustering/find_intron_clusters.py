@@ -14,6 +14,8 @@ import concurrent.futures
 import concurrent.futures
 import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.lines import Line2D
+
 warnings.filterwarnings("ignore", category=FutureWarning, module="pyranges")
 
 parser = argparse.ArgumentParser(description='Read in file that lists junctions for all samples, \
