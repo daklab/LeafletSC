@@ -190,7 +190,7 @@ def read_junction_files(junc_files, junc_suffix):
     """
     all_juncs_list = []
 
-    for junc_path in junc_files:
+    for junc_path in tqdm(junc_files):
         junc_path = Path(junc_path)
         print(f"Reading in junction files from {junc_path}")
 
@@ -206,7 +206,7 @@ def read_junction_files(junc_files, junc_suffix):
 
         files_not_read = []
 
-        for junc_file in tqdm(junc_files_in_path):
+        for junc_file in junc_files_in_path:
             try:
                 juncs = pd.read_csv(junc_file, sep="\t", header=None)
                 juncs['file_name'] = junc_file  # Add the file name as a new column
