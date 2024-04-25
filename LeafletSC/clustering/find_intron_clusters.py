@@ -194,10 +194,13 @@ def read_junction_files(junc_files, junc_suffix):
         junc_path = Path(junc_path)
         print(f"Reading in junction files from {junc_path}")
 
-        junc_files_in_path = list(junc_path.rglob(junc_suffix))
-        if not junc_files_in_path:
-            print(f"No junction files found in {junc_path} with suffix {junc_suffix}")
-            continue
+        if junc_path.is_dir():
+            junc_files_in_path = list(junc_path.rglob(junc_suffix))
+            if not junc_files_in_path:
+                print(f"No junction files found in {junc_path} with suffix {junc_suffix}")
+                continue
+        else:
+            junc_files_in_path = [junc_path]
 
         print(f"The number of junction files to be processed is {len(junc_files_in_path)}")
 
@@ -400,7 +403,11 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     #1. Check format of junc_files and convert to list if necessary
     # Can either be a list of folders with junction files or a single folder with junction files
 
-    if "," in junc_files:
+    # first check if junc_files is a list already 
+    if type(junc_files) == list:
+        # do nothing 
+        pass
+    elif "," in junc_files:
         junc_files = junc_files.split(",")
     else:
         # if junc_files is a single file, then convert it to a list

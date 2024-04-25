@@ -210,7 +210,7 @@ def read_junction_files(junc_files, junc_suffix):
                 juncs['cell_type'] = junc_file
                 all_juncs_list.append(juncs)  # Append the DataFrame to the list
             except Exception as e:
-                print(f"Could not read in {junc_file}: {e}")
+                #print(f"Could not read in {junc_file}: {e}")
                 files_not_read.append(junc_file)
 
     if len(files_not_read) > 0:
@@ -305,10 +305,13 @@ def mapping_juncs_exons(juncs_gr, gtf_exons_gr, singletons):
 def basepair_to_kilobase(bp):
     return bp / 1000  # Convert base pairs to kilobases
 
-def visualize_junctions(dat, junc_id, p_usage_ratio=True):
+def visualize_local_events(dat, junc_id=None, cluster_id=None, p_usage_ratio=True):
 
-    # Filter data for the specific junction ID
-    dat = dat[dat.Cluster == dat[dat.junction_id == junc_id].Cluster.values[0]]
+    # Filter dat based on junc_id, or cluster_id 
+    if junc_id is not None:
+        dat = dat[dat.Cluster == dat[dat.junction_id == junc_id].Cluster.values[0]]
+    elif cluster_id is not None:
+        dat = dat[dat.Cluster == cluster_id]
 
     # Get junctions
     juncs = dat[["chrom", "chromStart", "chromEnd", "strand", "intron_length", "counts_total", "Start_b", "End_b", "exon_id"]]
