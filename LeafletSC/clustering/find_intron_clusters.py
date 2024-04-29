@@ -80,6 +80,11 @@ parser.add_argument('--run_notebook', dest='run_notebook',
                     help='Indicate whether you would like to run the script in a notebook and return the table in session.\
                           Default is False')
 
+parser.add_argument('--filter_shared_ss', dest='filter_shared_ss',
+                    default=True,
+                    help='Indicate whether you would like to filter clusters by junctions with shared splice sites.\
+                          Default is True')
+
 args = parser.parse_args(args=[])
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -192,7 +197,7 @@ def read_junction_files(junc_files, junc_suffix):
 
     for junc_path in tqdm(junc_files):
         junc_path = Path(junc_path)
-        print(f"Reading in junction files from {junc_path}")
+        #print(f"Reading in junction files from {junc_path}")
 
         if junc_path.is_dir():
             junc_files_in_path = list(junc_path.rglob(junc_suffix))
@@ -202,7 +207,7 @@ def read_junction_files(junc_files, junc_suffix):
         else:
             junc_files_in_path = [junc_path]
 
-        print(f"The number of junction files to be processed is {len(junc_files_in_path)}")
+        #print(f"The number of junction files to be processed is {len(junc_files_in_path)}")
 
         files_not_read = []
 
@@ -249,6 +254,7 @@ def clean_up_juncs(all_juncs, col_names, min_intron, max_intron):
     all_juncs = all_juncs[all_juncs['chrom'].str.match(standard_chromosomes_pattern)]
 
     print("Cleaning up 'chrom' column")
+   
     # Remove "chr" prefix from 'chrom' column
     all_juncs['chrom'] = all_juncs['chrom'].str.replace(r'^chr', '', regex=True)
     
@@ -294,7 +300,7 @@ def mapping_juncs_exons(juncs_gr, gtf_exons_gr, singletons):
 
     if singletons == False:
         # remove singletons 
-        clusters = clusters[clusters.Cluster > 1]
+        clusters = clusters[clusters.Count > 1]
         # update juncs_gr to only include junctions that are part of clusters
         juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters.junction_id)]
         # update juncs_coords_unique to only include junctions that are part of clusters
@@ -398,7 +404,7 @@ def refine_clusters(clust_info):
 #        Run analysis and obtain intron clusters
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, junc_suffix, min_num_cells_wjunc, run_notebook):
+def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, junc_suffix, min_num_cells_wjunc, filter_shared_ss, run_notebook):
     
     #1. Check format of junc_files and convert to list if necessary
     # Can either be a list of folders with junction files or a single folder with junction files
@@ -443,7 +449,9 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
 
     # 7. Make gr object from ALL junctions across all cell types 
     print("Making gr object from all junctions across all cell types")
+
     juncs_gr = pr.from_dict({"Chromosome": all_juncs["chrom"], "Start": all_juncs["chromStart"], "End": all_juncs["chromEnd"], "Strand": all_juncs["strand"], "Cell": all_juncs["cell_type"], "junction_id": all_juncs["junction_id"], "counts_total": all_juncs["counts_total"]})
+
     # Unique set of junction coordinates across all samples (or cells) 
     juncs_gr = juncs_gr[["Chromosome", "Start", "End", "Strand", "junction_id", "counts_total"]].drop_duplicate_positions()
 
@@ -452,7 +460,7 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
         juncs_gr = juncs_gr[juncs_gr.counts_total > min_junc_reads]
 
     #keep only junctions that could be actually related to isoforms that we expect in our cells (via gtf file provided)
-    print("The number of junctions prior to assessing distance to exons is " + str(len(juncs_gr.junction_id.unique())))
+    print("The number of junctions after filtering by min_junc_reads " + str(len(juncs_gr.junction_id.unique())))
 
     # 8. Annotate junctions based on gtf file (if gtf_file is not empty)
     if gtf_file is not None:
@@ -469,12 +477,18 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
             juncs_coords_unique = juncs_coords_unique[juncs_coords_unique.junction_id.isin(clusters.junction_id)]
             print("The number of clusters after removing singletons is " + str(len(clusters.Cluster.unique())))
 
+    print("The number of junctions after gtf file mapping " + str(len(juncs_coords_unique.junction_id.unique())))
+    # print("The number of initial clusters after gtf file mapping " + str(len(juncs_coords_unique.Cluster.unique())))
+
     # 9. Now for each cluster we want to check that each junction shares a splice site with at least one other junction in the cluster
-    clusts_keep = filter_junctions_by_shared_splice_sites(clusters.df)
-    # update clusters, juncs_gr, and juncs_coords_unique to only include clusters
-    clusters = clusters[clusters.Cluster.isin(clusts_keep)]
-    juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters.junction_id)]
+    if filter_shared_ss == True:
+        clusts_keep = filter_junctions_by_shared_splice_sites(clusters.df)
+        # update clusters, juncs_gr, and juncs_coords_unique to only include clusters
+        clusters = clusters[clusters.Cluster.isin(clusts_keep)]
+        juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters.junction_id)]
+
     juncs_coords_unique = juncs_coords_unique[juncs_coords_unique.junction_id.isin(clusters.junction_id)]
+    
     print("The number of clusters after filtering for shared splice sites is " + str(len(clusters.Cluster.unique())))
     print("The number of junctions after filtering for shared splice sites is " + str(len(juncs_coords_unique.junction_id.unique())))
 
@@ -574,6 +588,7 @@ if __name__ == '__main__':
     min_junc_reads=args.min_junc_reads
     junc_suffix=args.junc_suffix #'*.juncswbarcodes'
     min_num_cells_wjunc=args.min_num_cells_wjunc
+    filter_shared_ss=args.filter_shared_ss
     # ensure singleton is boolean
     if args.keep_singletons == "True":
         singleton=True
@@ -595,5 +610,6 @@ if __name__ == '__main__':
     print("junc_suffix: " + junc_suffix)
     print("min_num_cells_wjunc: " + str(min_num_cells_wjunc))
     print("singleton: " + str(singleton))
+    print("shared_ss: " + str(filter_shared_ss))
 
-    main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, junc_suffix, min_num_cells_wjunc, run_notebook)
+    main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, threshold_inc, min_intron, max_intron, min_junc_reads, singleton, junc_suffix, min_num_cells_wjunc, filter_shared_ss, run_notebook)
