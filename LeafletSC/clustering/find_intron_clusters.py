@@ -207,7 +207,7 @@ def read_junction_files(junc_files, junc_suffix):
         else:
             junc_files_in_path = [junc_path]
 
-        #print(f"The number of junction files to be processed is {len(junc_files_in_path)}")
+        print(f"The number of junction files to be processed is {len(junc_files_in_path)}")
 
         files_not_read = []
 
@@ -218,7 +218,7 @@ def read_junction_files(junc_files, junc_suffix):
                 juncs['cell_type'] = junc_file
                 all_juncs_list.append(juncs)  # Append the DataFrame to the list
             except Exception as e:
-                #print(f"Could not read in {junc_file}: {e}")
+                print(f"Could not read in {junc_file}: {e}")
                 files_not_read.append(junc_file)
 
     if len(files_not_read) > 0:
@@ -229,7 +229,7 @@ def read_junction_files(junc_files, junc_suffix):
 
     return all_juncs
 
-def clean_up_juncs(all_juncs, col_names, min_intron, max_intron):
+def clean_up_juncs(all_juncs, col_names, min_intron, max_intron, num_cells_wjunc):
     
     # Apply column names to the DataFrame
     all_juncs.columns = col_names
@@ -252,8 +252,6 @@ def clean_up_juncs(all_juncs, col_names, min_intron, max_intron):
     # New filter for 'chrom' column to handle "chr" prefix, using .loc for safe in-place modification
     standard_chromosomes_pattern = r'^(?:chr)?(?:[1-9]|1[0-9]|2[0-2]|X|Y|MT)$'
     all_juncs = all_juncs[all_juncs['chrom'].str.match(standard_chromosomes_pattern)]
-
-    print("Cleaning up 'chrom' column")
    
     # Remove "chr" prefix from 'chrom' column
     all_juncs['chrom'] = all_juncs['chrom'].str.replace(r'^chr', '', regex=True)
@@ -261,11 +259,29 @@ def clean_up_juncs(all_juncs, col_names, min_intron, max_intron):
     # Add 'junction_id' column
     all_juncs['junction_id'] = all_juncs['chrom'] + '_' + all_juncs['chromStart'].astype(str) + '_' + all_juncs['chromEnd'].astype(str)
     
+    # The initial number of junctions is the number of unique junctions in all_juncs
+    print("The number of junctions before filtering for num_cells_wjunc " + str(len(all_juncs.junction_id.unique())))
+
+    # first figure out how many cells have each junction by counting number of rows associated with each junction id
+    num_cells_wjunc = all_juncs.groupby("junction_id").size()
+    # filter num_cells_wjunc to keep only junctions with number greater than min_num_cells_wjunc
+    num_cells_wjunc = num_cells_wjunc[num_cells_wjunc >= min_num_cells_wjunc]
+    # filter all_juncs to keep only junctions with number greater than min_num_cells_wjunc
+    all_juncs = all_juncs[all_juncs.junction_id.isin(num_cells_wjunc.index)]
+    # add column indicating number of cells wtih junctions to all_juncs table
+    all_juncs["num_cells_wjunc"] = all_juncs["junction_id"].map(num_cells_wjunc)
+
+    # The initial number of junctions is the number of unique junctions in all_juncs
+    print("The number of junctions after filtering for num_cells_wjunc " + str(len(all_juncs.junction_id.unique())))
+
     # Get total score for each junction and merge with all_juncs with new column "total_counts"
     all_juncs = all_juncs.groupby('junction_id').agg({'score': 'sum'}).reset_index().merge(all_juncs, on='junction_id', how='left')
 
     # rename score_x and score_y to total_junc_counts and score 
     all_juncs.rename(columns={'score_x': 'counts_total', 'score_y': 'score'}, inplace=True)
+
+    # The initial number of junctions is the number of unique junctions in all_juncs
+    print("The number of junctions after filtering for intron length is " + str(len(all_juncs.junction_id.unique())))
 
     return(all_juncs)
 
@@ -301,6 +317,7 @@ def mapping_juncs_exons(juncs_gr, gtf_exons_gr, singletons):
     if singletons == False:
         # remove singletons 
         clusters = clusters[clusters.Count > 1]
+        print(juncs_gr)
         # update juncs_gr to only include junctions that are part of clusters
         juncs_gr = juncs_gr[juncs_gr.junction_id.isin(clusters.junction_id)]
         # update juncs_coords_unique to only include junctions that are part of clusters
@@ -420,16 +437,9 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
         junc_files = [junc_files]
 
     #2. run read_junction_files function to read in all junction files
-    print(f"Loading files obtained from {sequencing_type} sequencing")
+#    print(f"Loading files obtained from {sequencing_type} sequencing")
 
     all_juncs = read_junction_files(junc_files, junc_suffix)
-
-    #3. If gtf_file is not empty, read it in and process it
-    if gtf_file is not None:
-        gtf_exons_gr = process_gtf(gtf_file)
-        print("Done extracting exons from gtf file")
-    else:
-        pass
 
     #4. Convert parameters to integers outside the loop
     min_intron = int(min_intron)
@@ -462,6 +472,13 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     #keep only junctions that could be actually related to isoforms that we expect in our cells (via gtf file provided)
     print("The number of junctions after filtering by min_junc_reads " + str(len(juncs_gr.junction_id.unique())))
 
+    #3. If gtf_file is not empty, read it in and process it
+    if gtf_file is not None:
+        gtf_exons_gr = process_gtf(gtf_file)
+        print("Done extracting exons from gtf file")
+    else:
+        pass
+    
     # 8. Annotate junctions based on gtf file (if gtf_file is not empty)
     if gtf_file is not None:
         juncs_gr, juncs_coords_unique, clusters = mapping_juncs_exons(juncs_gr, gtf_exons_gr, singleton) 
