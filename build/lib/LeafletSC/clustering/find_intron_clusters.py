@@ -207,7 +207,7 @@ def read_junction_files(junc_files, junc_suffix):
         else:
             junc_files_in_path = [junc_path]
 
-        print(f"The number of junction files to be processed is {len(junc_files_in_path)}")
+        #print(f"The number of junction files to be processed is {len(junc_files_in_path)}")
 
         files_not_read = []
 
@@ -229,7 +229,7 @@ def read_junction_files(junc_files, junc_suffix):
 
     return all_juncs
 
-def clean_up_juncs(all_juncs, col_names, min_intron, max_intron, num_cells_wjunc):
+def clean_up_juncs(all_juncs, col_names, min_intron, max_intron, min_num_cells_wjunc):
     
     # Apply column names to the DataFrame
     all_juncs.columns = col_names
@@ -455,7 +455,7 @@ def main(junc_files, gtf_file, output_file, sequencing_type, junc_bed_file, thre
     col_names += ["file_name", "cell_type"]
     
     # 6. Clean up junctions and filter for intron length
-    all_juncs = clean_up_juncs(all_juncs, col_names, min_intron, max_intron)
+    all_juncs = clean_up_juncs(all_juncs, col_names, min_intron, max_intron, min_num_cells_wjunc)
 
     # 7. Make gr object from ALL junctions across all cell types 
     print("Making gr object from all junctions across all cell types")
