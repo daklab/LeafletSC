@@ -53,22 +53,20 @@ With LeafletSC, you can:
 - Generate synthetic alternative splicing datasets for robust analysis testing.
 
 ## How does it work? 
-The full method can be found in our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3) while the graphical model is shown below:
+The full method can be found in our [paper](https://proceedings.mlr.press/v240/isaev24a/isaev24a.pdf) while the graphical model is shown below:
 <p align="center">
   <img src="https://github.com/daklab/Leaflet/assets/23510936/3e147ba5-7ee8-47ae-b84c-5e99e0551acf">
 </p>
 
-## If you use Leaflet, please cite our [paper](https://www.biorxiv.org/content/10.1101/2023.10.17.562774v3)
+## If you use Leaflet, please cite our [paper](https://proceedings.mlr.press/v240/isaev24a/isaev24a.pdf)
 
 ```
-@unpublished{Isaev2023-bf,
-  title    = "Investigating RNA splicing as a source of cellular diversity using a binomial mixture model",
-  author   = "Isaev, Keren and Knowles, David A",
-  journal  = "bioRxiv",
-  pages    = "2023.10.17.562774",
-  month    = oct,
-  year     = 2023,
-  language = "en"
+@inproceedings{Isaev2023-ax,
+  author = {Isaev, Keren and Knowles, David A},
+  title = {Investigating RNA splicing as a source of cellular diversity using a binomial mixture model},
+  booktitle = {Proceedings of Machine Learning Research: MLCB 2023},
+  year = {2023},
+  url = {https://proceedings.mlr.press/v240/isaev24a.html}
 }
 ```
 
